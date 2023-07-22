@@ -1988,7 +1988,7 @@ ggplot(data =
 # 2023.07.22 - Using geom_ridgeline instead of freq_poly with alpha
 
 ## Original from chapter:
-```{r}
+```{r, fig.width=3, fig.height=3}
 Fig1_v1_data <- visited_1st_4d_data %>%
   filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
          clutch_initiated_order == 1, visit_ends < last_day_fID)
@@ -2001,33 +2001,6 @@ strat_data_table1 <- visited_1st_4d_data %>%
   select(`Ant exclusion`, `Females not removed (A)`, `Leaf hosted a clutch (B)`,
          `Neither (!A&!B)`) %>%
   tbl_summary(by=`Ant exclusion`)
-
-# strat_data_table1 %>%
-#   as_flex_table() %>%
-#   flextable::save_as_docx(path=here("prelim_figs/strat_data_table1.docx"))
-
-strat_data_table2 <- visited_1st_4d_data %>%
-  filter(!is.na(initiation_date), !females_removed) %>%
-  mutate(`Ant exclusion` = ifelse(ants_removed, "Ants excluded", "Control"),
-         `Mother at initiation (A)` = !is.na(clutch_initiated_order),
-         `First clutch initiated (B)`=clutch_initiated_order==1,
-         `Didn't disappear (C)`=visit_ends<last_day_fID,
-         `Marked (D)`=!grepl("U", Female_ID),
-         `Visited early (E)`=visited_1st_4d,
-         `Figure 3A (A&B&C&D&!E)`=`Mother at initiation (A)`&`First clutch initiated (B)`&
-           `Didn't disappear (C)`&`Marked (D)`&!`Visited early (E)`,
-         `Figure 3B (A&B&C&D&E)`=`Mother at initiation (A)`&`First clutch initiated (B)`&
-           `Didn't disappear (C)`&`Marked (D)`&`Visited early (E)`,
-         `Figure S4C (!A&C)` = !`Mother at initiation (A)`&`Didn't disappear (C)`) %>%
-  select(`Ant exclusion`, `Mother at initiation (A)`, `First clutch initiated (B)`,
-         `Didn't disappear (C)`, `Marked (D)`,`Visited early (E)`, 
-         `Figure 3A (A&B&C&D&!E)`, `Figure 3B (A&B&C&D&E)`, `Figure S4C (!A&C)`) %>%
-  tbl_summary(by=`Ant exclusion`, missing="no")
-
-# strat_data_table2 %>%
-#   as_flex_table() %>%
-#   flextable::save_as_docx(path=here("prelim_figs/strat_data_table2.docx"))
-  
 
 Fig1_v1A <- ggplot(data = filter(Fig1_v1_data, `visited in 4 days` == "Not visited")) +
   geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
@@ -2069,9 +2042,8 @@ Fig1_v1B <- ggplot(data = filter(Fig1_v1_data, `visited in 4 days` == "Visited")
 ```
 
 ## New version
-```{r}
-visit_labels <- 
-
+### Relative desert date
+```{r, fig.width=3, fig.height=3}
 visit_colors <- rev(unique(ggplot_build(Fig1_v1D)$data[[1]]$fill))
 
 hist_strips <- strip_nested(
@@ -2088,6 +2060,21 @@ hist_strips <- strip_nested(
        element_blank(), element_blank()),
      by_layer_y = FALSE
 )
+
+base_text <- expand.grid(ants = c("Ants removed", "Control"),
+            `visited in 4 days` = c("Not visited within first 4 days", 
+                                    "Visited within first 4 days")) %>%
+  tibble()
+
+init_text <- base_text %>%
+  mutate(label = ifelse(ants=="Ants removed" & `visited in 4 days`=="Not visited within first 4 days", 
+         "Mean init. date", 
+         ""))
+
+hatch_text <- base_text %>%
+  mutate(label = ifelse(ants=="Ants removed" & `visited in 4 days`=="Not visited within first 4 days", 
+         "Hatch date", 
+         ""))
 
 visited_1st_4d_data %>%
   filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
@@ -2112,6 +2099,74 @@ visited_1st_4d_data %>%
                 color = "gray", size=1) +
   ggh4x::facet_grid2(vars(`visited in 4 days`, ants), 
                      strip = hist_strips) +
-  theme(strip.background = element_rect(color = NA))
+  theme(strip.background = element_rect(color = NA),
+        legend.justification = c(1,1),
+        legend.position = c(1,0.2)) +
+  geom_text(data = init_text,
+            aes(x = -20, y = 10, label = label),
+            hjust = 0, vjust = -1, color = "gray", fontface = "bold") +
+  geom_text(data = hatch_text,
+            aes(x = 0, y = 10, label = label),
+            hjust = 0, vjust = -1, color = "gray", fontface = "bold") +
+  coord_cartesian(clip = "off")
+```
+
+### Guarding duration
+```{r, fig.width=3, fig.height=3}
+visit_colors <- rev(unique(ggplot_build(Fig1_v1D)$data[[1]]$fill))
+
+hist_strips <- strip_nested(
+     # Horizontal strips
+     background_y = list(
+       element_rect(fill = visit_colors[1]), 
+       element_rect(fill = visit_colors[2]), 
+       element_blank(), element_blank(), 
+       element_blank(), element_blank()),
+     text_y = list(
+       element_text(color = c("black")), 
+       element_text(color = c("black")), 
+       element_blank(), element_blank(), 
+       element_blank(), element_blank()),
+     by_layer_y = FALSE
+)
+
+base_text <- expand.grid(ants = c("Ants removed", "Control"),
+            `visited in 4 days` = c("Not visited within first 4 days", 
+                                    "Visited within first 4 days")) %>%
+  tibble()
+
+hatch_text <- base_text %>%
+  mutate(label = ifelse(ants=="Ants removed" & `visited in 4 days`=="Not visited within first 4 days", 
+         "Hatch date", 
+         ""))
+
+(guarding_durations_plot_2023 <- visited_1st_4d_data %>%
+  filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
+         clutch_initiated_order == 1, visit_ends < last_day_fID) %>% 
+  filter(!is.na(`visited in 4 days`)) %>%
+  mutate(`visited in 4 days` = 
+           ifelse(`visited in 4 days` == "Visited", 
+                  "Visited within first 4 days", 
+                  "Not visited within first 4 days")) %>%
+  ggplot(aes(x=guard_duration, fill=ants)) +
+  geom_histogram(binwidth = 4) +
+  theme_publilia() +
+  xlab("Guarding duration") +
+  ylab("Number of females") +
+  scale_y_continuous(breaks = c(0,4,8),
+                     labels = label_number(accuracy = 1)) +
+  scale_color_manual(values = c("black", "brown1")) +
+  scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = 20, linetype="dashed", 
+                color = "gray", size=1) +
+  ggh4x::facet_grid2(vars(`visited in 4 days`, ants), 
+                     strip = hist_strips) +
+  theme(strip.background = element_rect(color = NA),
+        legend.justification = c(1,1),
+        legend.position = c(1,0.2)) +
+  geom_text(data = hatch_text,
+            aes(x = 20, y = Inf, label = label),
+            hjust = -0.1, vjust = 0, color = "gray", fontface = "bold") +
+  coord_cartesian(clip = "off"))
 ```
 
