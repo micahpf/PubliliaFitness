@@ -1,0 +1,859 @@
+---
+title: '01 - TreehopperFitness: Data prep'
+author: "Micah Fletcher"
+date: '`r Sys.Date()`'
+output: 
+  rmdformats::robobook:
+  fig_width: 9
+toc_depth: 3
+---
+  
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 8, fig.height = 6) 
+
+library(kableExtra)   ## Needed if rendering tables
+```
+
+<!-- This file will not execute by itself. It should be called within the  -->
+<!-- runfile to render the final report. You can arrange figures, add explanations, -->
+<!-- and do other aesthetic tweaks here. -->
+  
+```{=html}
+<style type="text/css">
+  .book .book-body .page-inner {
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+details > summary {
+  display: list-item;
+}
+</style>
+```
+
+# Data input, qc and pre-processessing for 2019 Publilia field data
+```{r}
+library(here)
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(stringr)
+
+theme_set(theme_bw())
+```
+
+## 0 - Raw Data Input
+Read in the data from `data_in_progress/Watershed_field_data_2019_ALL_local.xlsx`
+```{r, warning = FALSE}
+col_types = c("date", rep("text",8), "date", rep("text", 12))
+in_filename <- here("data/Watershed_field_data_2019_ALL_local.xlsx")
+in_data <- rbind(read_xlsx(in_filename, sheet = "A", col_types = col_types),
+  read_xlsx(in_filename, sheet = "B", col_types = col_types),
+  read_xlsx(in_filename, sheet = "C", col_types = col_types),
+  read_xlsx(in_filename, sheet = "D", col_types = col_types),
+  read_xlsx(in_filename, sheet = "E", col_types = col_types),
+  read_xlsx(in_filename, sheet = "F", col_types = col_types),
+  read_xlsx(in_filename, sheet = "G", col_types = col_types),
+  read_xlsx(in_filename, sheet = "H", col_types = col_types)) %>%
+  mutate(Date = as_date(Date),
+         Time = hm(Time)) %>% 
+  group_by(row_number()) %>% 
+  mutate(Leaf = ifelse(!is.na(Female_ID) & is.na(Leaf), 
+                       "S",
+                       Leaf),
+         Female_ID = ifelse(Female_ID %in% c("Uf", "Um", "M", "U") , # append plant and leaf to ID if female id is "unknown"
+                            paste0(c(Female_ID, "_", as.character(Plant), "_", as.character(Leaf)), collapse = ""),
+                            Female_ID)) %>%
+  ungroup()
+```
+
+# 1 - Manually check and revise female IDs reproducibly
+
+Create `Female_locations_on_dates` table to use for to manually check for obvious mismatched female IDs and typos in plant id or leaf id etc.
+
+Then manually log these changes into `{dorm letter} Female_ID revisions` sheet then import these and revise the female IDs in the input data without editing the original data file.
+
+Note that changes to things like plant id and leaf id had to be manually edited in the original data file. These are documented in the "Revisions" column in each sheet for each dorm in `Watershed_field_data_2019_ALL_local.xlsx`
+
+## 1.1 - Flag duplicate female ID entries
+
+Flag cases where the same female ID is used on the same day in the same dorm to aid in manual checking.
+
+Display false negative and false positive duplicates in `Dup?` column (used in excel for field data entry).
+
+```{r}
+in_data_dupStatus <- in_data %>%
+  group_by(Date, Dorm, Female_ID) %>%
+    mutate(n_female_dupes = ifelse(!is.na(Female_ID) & !(Female_ID %in% c("E", "E?", "0", NA)),
+                                   n(),
+                                   NA),
+           female_dup_order = ifelse(!is.na(Female_ID) & !(Female_ID %in% c("E", "E?", "0", NA)),
+                                     row_number(),
+                                     NA)) %>%
+  ungroup() %>%
+  mutate(dup_status = ifelse(!is.na(n_female_dupes) & !(Female_ID %in% c("E", "E?", "0", "N", NA)),
+                             ifelse(n_female_dupes == 1 & !is.na(as.numeric(`Dup?`)),
+                                    "Fpos", # copy-paste error or "?" ambiguity in Excel
+                                    ifelse(n_female_dupes > 1 & !is.na(as.numeric(`Dup?`)),
+                                           "Tpos", 
+                                           ifelse(n_female_dupes > 1 & is.na(as.numeric(`Dup?`)),
+                                                  "Fneg", # copy-paste error
+                                                  ifelse(n_female_dupes == 1 & is.na(as.numeric(`Dup?`)),
+                                                         "Tneg",
+                                                         "Something went wrong!")))),
+                             NA),
+         Fem_IDn = ifelse(!is.na(n_female_dupes) & !(Female_ID %in% c("E", "E?", "0", "N", NA)),
+                               ifelse(n_female_dupes == 1,
+                                      Female_ID,
+                                      paste0(Female_ID, "_d", female_dup_order)),
+                               NA))
+
+in_data_dupStatus %>%
+  count(dup_status)
+
+in_data_dupStatus %>% filter(dup_status == "Fpos") %>% distinct(Female_ID) %>% print(n=Inf)
+in_data_dupStatus %>% filter(dup_status == "Tpos") %>% distinct(Female_ID) %>% print(n=Inf)
+in_data_dupStatus %>% filter(dup_status == "Fneg") %>% distinct(Female_ID) %>% print(n=Inf)
+in_data_dupStatus %>% filter(dup_status == "Tneg") %>% distinct(Female_ID) %>% print(n=Inf)
+in_data_dupStatus %>% filter(dup_status == "Something went wrong!") %>% distinct(Female_ID) %>% print(n=Inf)
+```
+
+## 1.2 - Create `Female_locations_on_dates_dupStatus` table for manual checking.
+Create female locations on dates table for manual checking.
+```{r}
+female_roster_days_dupStatus <- in_data_dupStatus %>%
+  group_by(Date, Dorm) %>%
+    distinct(Fem_IDn, .keep_all = TRUE) %>%
+  ungroup() %>%
+  select(Date, Dorm, Fem_IDn, Female_ID, Plant, Leaf, Eggs) %>%
+  filter(!is.na(Fem_IDn), !grepl("M", Female_ID, ignore.case = TRUE))
+
+female_roster_dupStatus <- female_roster_days_dupStatus %>%
+  group_by(Dorm, Fem_IDn) %>%
+    distinct(Fem_IDn) %>%
+  ungroup()
+
+# what days are each female observed on?
+Female_locations_on_dates_dupStatus <- female_roster_days_dupStatus %>%
+  group_by(row_number()) %>%
+    mutate(location = paste0(c(Dorm, Plant, "_", Leaf), collapse = ""),
+           Dorm_Fem_IDn = paste0(c(Dorm, "_", Fem_IDn), collapse = "")) %>%
+  ungroup() %>%
+  select(Dorm_Fem_IDn, location, Date) %>%
+  spread(Date, location)
+
+Days_observed_dupStatus <- female_roster_days_dupStatus %>% 
+  group_by(Dorm, Fem_IDn) %>%
+    summarize(Days_observed = n()) %>%
+  ungroup() %>%
+  arrange(Dorm, Days_observed)
+
+# used 20200319 version
+write_csv(Days_observed_dupStatus, here("data/manual_check/Days_observed_dupStatus.csv"))
+```
+
+## 1.3 - Revise Female_ID using `Female_ID revisions dupStatus` sheet
+
+```{r}
+# Read in revisions table
+Female_ID_revisions <- read_xlsx(in_filename, sheet = "Female_ID revisions dupStatus", col_types = c("date", "text", "text", "text","text", "text", "text", "text"), na = c("", "NA")) %>%
+  mutate(Date = as_date(Date),
+         Female_ID_revision_notes = Notes) %>%
+  select(-Notes) %>%
+  mutate(Date = `year<-`(Date, 2019)) # excel's fuckery with dates means any revisions I did in 2020 in the format m/d were interpretted as 2020-%m-%d
+
+# Check number of duplicate rows in revisions sheet (should be 0)
+ID_revision_duplicates <- Female_ID_revisions %>%
+  group_by(Date, Dorm, Plant, Leaf, `From ID`) %>%
+    mutate(n_rows_FromID = n()) %>%
+  ungroup() %>%
+  group_by(Date, Dorm, Plant, Leaf, `To ID`) %>%
+    mutate(n_rows_ToID = n()) %>%
+  ungroup() %>%
+  arrange(Dorm, Plant, Leaf, Date) %>%
+  filter(n_rows_FromID > 1 | n_rows_ToID > 1)
+print(paste("Number of duplicate rows in revisions sheet:", nrow(ID_revision_duplicates)))
+
+# Implement revisions from revisions table
+All_data_v1 <- in_data_dupStatus %>% 
+  full_join(Female_ID_revisions, by = c("Date", "Dorm", "Plant", "Leaf", "Fem_IDn" = "From ID")) %>%
+  select(-dup_status) %>%
+  # check whether any revisions entries had typos in location or tried to add a female where there was none
+  mutate(orphaned_revisions = ifelse(!is.na(`To ID`) & is.na(Female_ID) | `To ID` == "NA",
+                TRUE,
+                FALSE)) %>%
+  # change Female_ID to revised ID unless there was originally no Female_ID
+  mutate(Female_ID = ifelse(!orphaned_revisions & !is.na(`To ID`),
+                            `To ID`,
+                            # add new Female_ID where there was originally no Female_ID
+                            ifelse(orphaned_revisions & !is.na(`NA To ID`),
+                                   `NA To ID`,
+                                   Fem_IDn))) %>%
+  # create `location` value combining dorm, plant and leaf into a string
+  group_by(row_number()) %>%
+    mutate(location = ifelse(!is.na(Leaf),
+                             paste0(c(Dorm, Plant, "_", Leaf), collapse = ""),
+                             NA)) %>%
+  ungroup() %>%
+  select(-`NA To ID`)
+
+print(paste("Number of new Female_IDs where original Female_ID was NA:", nrow(All_data_v1  %>%
+  filter(orphaned_revisions))))
+
+# Generate new roster so I can manually doublecheck that there are no more mismatched IDs
+female_roster_days_v1 <- All_data_v1 %>%
+  group_by(Date, Dorm) %>%
+    distinct(Female_ID, .keep_all = TRUE) %>%
+  ungroup() %>%
+  select(Date, Dorm, Female_ID, Plant, Leaf, Eggs) %>%
+  filter(!is.na(Female_ID), !(Female_ID %in% c("E", "E?", "N", "0")), !grepl("M", Female_ID, ignore.case = TRUE))
+
+female_roster_v1 <- female_roster_days_v1 %>%
+  group_by(Dorm, Female_ID) %>%
+    distinct(Female_ID) %>%
+  ungroup()
+
+data_revised_Female_locations_on_dates_v1 <- female_roster_days_v1 %>%
+  group_by(row_number()) %>%
+    mutate(location = ifelse(!is.na(Leaf),
+                             paste0(c(Dorm, Plant, "_", Leaf), collapse = ""),
+                             NA),
+           Female_ID = paste0(c(Dorm, "_", Female_ID), collapse = "")) %>%
+  ungroup() %>%
+  select(Female_ID, location, Date) %>%
+  spread(Date, location)
+
+print("Number of unique female IDs were in original dataset vs. manually revised dataset:")
+num_females_All_data <- female_roster_dupStatus %>% nrow()
+num_females_All_data_revised <- female_roster_v1 %>% nrow()
+print(paste("num_females_All_data:", num_females_All_data))
+print(paste("num_females_All_data_revised:", num_females_All_data_revised))
+```
+
+### Plot the number of females over time.
+```{r}
+Num_females_eggs_v1 <- female_roster_days_v1 %>% # Note that this is not an accurate measure of the number of eggs since there are duplicate entries for the same leaf if more than one female per leaf
+  group_by(Date, Dorm) %>%
+    summarize(Num_females = sum(!is.na(Female_ID)), num_eggs = sum(!is.na(Eggs))) %>%
+  ungroup()
+
+# failed to visit all dorms on these days so they would uneven sampling
+omit_days_ABCE = as_date(c("2019-06-02", "2019-06-03", "2019-06-05"))
+
+Num_females_ABCE_v1 <- Num_females_eggs_v1 %>%
+  filter(Dorm %in% c("A", "B", "C", "E")) %>%
+  group_by(Date) %>%
+  summarize(Num_females = sum(Num_females)) %>%
+  ungroup() %>%
+  filter(!(Date %in% omit_days_ABCE)) %>%
+  mutate(year = "2019")
+
+ggplot(data = Num_females_eggs_v1) +
+  geom_line(aes(x = Date, y = Num_females, color = Dorm), size = 2)
+
+ggplot(data = Num_females_ABCE_v1, aes(x = Date, y = Num_females)) +
+  geom_line() +
+  scale_y_continuous(limits = c(0,250))
+```
+
+# 2 - Manually check and revise egg initiation and hatching times reproducibly
+
+*Note: This section saves many `.csv` files with tables to aid manual checks. In each case, the contents of these files were copied into the `data/Watershed_field_data_2019_ALL_local.xlsx` spreadsheet as new sheet at the time of initial analysis, revised manually as needed and subsequently read back in to this analysis script and used to revise the data object in the R environment. Every effort was made to keep the original field-collected dataseets unchanged in favor of programmatically revising the loading R object. In a few cases where this was not possible, the original spreadsheet was edited (with a note in the `Revisions` column). As such, newly generated check tables using this script may differ from the originals documented in `data/Watershed_field_data_2019_ALL_local.xlsx`, which preserve the original state of the data.*
+
+## 2.1 - Flag cases where egg status is missing or inconsistent across multiple entries
+(e.g. multiple females on same eggs, but only the first row was manually entered in the field)
+
+I'll be redoing the same check many times so here's a function:
+```{r}
+egg_conflict_check <- function(dataset){
+  egg_status <- dataset %>%
+    group_by(row_number()) %>%
+    filter(!Leaf %in% c("S","A"), !substring(Leaf, nchar(Leaf)) == "A") %>%
+  group_by(Date, location) %>%
+    distinct(Eggs, .keep_all = TRUE) %>%
+    # mult entries for location/date but some are missing egg data
+    mutate(eggs_need_filling = n() > 1) %>%
+    # unique text entries for location/date
+    mutate(num_unique_eggs = sum(!is.na(Eggs))) %>%
+    # flag cases where more than one non-NA value unique values for Eggs
+    mutate(egg_text_conflict = num_unique_eggs > 1) %>%  
+    # flag cases where Egg status is ambiguous
+    mutate(egg_status_missing = num_unique_eggs != 0 & Eggs %in% c("E?", "***")) %>% 
+  ungroup() %>%
+  select(Date, location, Eggs_status = Eggs, eggs_need_filling, egg_text_conflict, egg_status_missing, num_unique_eggs)
+  return(egg_status)
+}
+```
+
+```{r}
+egg_status_v1_tmp <- egg_conflict_check(All_data_v1) %>%
+  select(Date, location, Eggs_status, eggs_need_filling, egg_text_conflict, 
+         egg_status_missing, num_unique_eggs)
+
+# Flag any egg text conflicts or missing data that needs filling
+egg_status_v1 <- egg_conflict_check(All_data_v1)
+
+# Make dataframe to take missing values from
+egg_fill_source <- egg_status_v1 %>%
+  # keep only the Eggs values to fill missing data with for each location-time
+  filter(eggs_need_filling, !egg_text_conflict, !is.na(Eggs_status)) %>%
+  select(Date, location, Eggs_status, fill_from_src = eggs_need_filling)
+
+# Join original dataset with new values such that missing values will be filled
+# (but manually check that Eggs_filled is what you expect before replacing Eggs)
+All_data_v2 <- All_data_v1 %>%
+  left_join(egg_fill_source, by=c("Date", "location")) %>%
+  mutate(Eggs_filled = ifelse(is.na(fill_from_src),
+                              Eggs,
+                              Eggs_status))
+  
+# Manually check that Eggs_filled is what you expect before replacing Eggs
+All_data_v2 <- All_data_v2 %>% mutate(Eggs = Eggs_filled) %>% select(-Eggs_filled, -Eggs_status)
+```
+
+## 2.2 - Create tables to use for manually checking and revising egg status text conflict or missing data
+```{r}
+# Create table for entries text conflict that need to be resolved
+egg_text_conflict_data_v1 <- All_data_v2 %>% # egg_text_conflict: 39 on 2019/09/24
+  left_join(egg_status_v1, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
+  filter(egg_text_conflict) %>%
+  select(Date, Dorm, Plant, Leaf, Eggs)
+write_csv(egg_text_conflict_data_v1, here("data/manual_check/egg_text_conflict_data.csv"))
+
+# Create table for entries with missing data that need to be resolved
+egg_status_missing_data_v1 <- All_data_v2 %>% # egg_status_missing: 219 on 2019/09/24
+  left_join(egg_status_v1, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
+  filter(egg_status_missing, !grepl('NA|M', Female_ID)) %>%
+  select(Date, Dorm, Plant, Leaf, Eggs)
+write_csv(egg_status_missing_data_v1, here("data/manual_check/egg_status_missing_data.csv"))
+
+print("Conflicts and missing data before implementing manual revisions:")
+print(paste("egg_text_conflict_data:", nrow(egg_text_conflict_data_v1)))
+print(paste("egg_status_missing_data:", nrow(egg_status_missing_data_v1)))
+```
+
+## 2.3 - Import and implement `egg status missing data` revisions
+`import "egg_stats_missing_data revision" > implement revisions > `
+   `standardize the L6A8 vs. L6a8 vs. 6a8 format > get summary of start of egg number over time > `
+   `define a (soft?) cuttoff for settling *** ambiguities > implement cuttoff > proceed to checking clutch lifetime`
+   
+```{r}
+# Read in manual revisons table
+egg_status_revisions <- read_xlsx(in_filename, sheet = "egg_stats_missing_data revision", col_types = c("date", "text", "text", "text","text", "text", "text", "date")) %>%
+  mutate(Date = as_date(Date)) %>%
+  select(-`Date revised`)
+
+# Check revisions table for duplicate (i.e. overwriting) entries
+egg_stats_revision_duplicates <- egg_status_revisions %>%
+  group_by(Date, Dorm, Plant, Leaf) %>%
+    mutate(n_rows = n()) %>%
+  ungroup() %>%
+  arrange(Dorm, Plant, Leaf, Date) %>%
+  filter(n_rows > 1)
+print(paste("Number of duplicate rows in revisions sheet:", nrow(egg_stats_revision_duplicates)))
+
+# Implement revisions from revisions table
+All_data_v3 <- All_data_v2 %>% 
+  rename(Eggs_v2 = Eggs) %>%
+  full_join(egg_status_revisions, by = c("Date", "Dorm", "Plant", "Leaf")) %>%
+  rename(Eggs_v2_xls = Eggs, Notes = Notes.x) %>%
+  # need to check whether locations are properly assigned to each revision
+  mutate(Eggs_v3 = ifelse(Eggs_revisions != "IGNORE" & !is.na(Eggs_revisions),
+                            Eggs_revisions,
+                            Eggs_v2)) %>%
+  select(-Num_adults, -Description, -`Paired with`, -Time, -Notes.y, -`Dup?`, -`row_number()`,
+         -fill_from_src, -Eggs_v2_xls, -Eggs_revisions, -orphaned_revisions, -Fem_IDn,
+         -`To ID`, -n_female_dupes, -female_dup_order, -Female_ID_revision_notes, -Eggs_v2) %>%
+  select(Date, Dorm, Plant, Leaf, location, Female_ID, Eggs = Eggs_v3,
+         N1, N2, N5, New_eA, Old_eA, nymph_origin, everything())
+
+# Check whether revisions implementation worked by rerunning inconsistency checks
+# Flag any egg text conflicts or missing data that needs filling
+egg_status_v2 <- egg_conflict_check(All_data_v3)
+
+# Conflicts and missing data after implementing manual revisions
+egg_text_conflict_data_v2 <- All_data_v3 %>%
+  group_by(row_number()) %>%
+  mutate(Female_ID = paste0(c(Dorm, "_", Female_ID), collapse = "")) %>%
+  ungroup() %>%
+  left_join(egg_status_v2, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
+  filter(egg_text_conflict) %>%
+  select(Date, Dorm, Plant, Leaf, Eggs)
+
+egg_status_missing_data_v2 <- All_data_v3 %>%
+  group_by(row_number()) %>%
+  mutate(Female_ID = paste0(c(Dorm, "_", Female_ID), collapse = "")) %>%
+  ungroup() %>%
+  left_join(egg_status_v2, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
+  filter(egg_status_missing, !grepl('NA|M', Female_ID)) %>%
+  select(Date, Dorm, Plant, Leaf, Eggs) #%>% print(n=Inf)
+
+print("Conflicts and missing data after implementing manual revisions:")
+print(paste("egg_text_conflict_data_eggs_revised:", nrow(egg_text_conflict_data_v2)))
+print(paste("egg_status_missing_data_eggs_revised:", nrow(egg_status_missing_data_v2)))
+
+# 20200326 version was used
+write_csv(egg_status_missing_data_eggs_revised, here("data/manual_check/egg_status_missing_data_eggs_revised.csv"))
+```
+
+## 2.4 - Import and implement `egg measures` revisions
+```{r}
+# Read in manual revisons table
+egg_measures_revisions <- read_xlsx(in_filename, sheet = "egg_measures_revisions", col_types = c("text", "date", "text", "text","text"), na = c("", "NA")) %>%
+  mutate(Date = as_date(Date)) %>%
+  select(-Notes)
+
+# Check revisions table for mismatched entries
+egg_measures_revisions_mismatched <- All_data_v3 %>%
+  full_join(egg_measures_revisions, by = c("location", "Date")) %>%
+  semi_join(egg_measures_revisions, by = c("location", "Date")) %>%
+  filter(is.na(Eggs) | Eggs != `Eggs from`) %>%
+  select(Date, Dorm, Plant, Leaf, location, Female_ID, Eggs, `Eggs from`, `Eggs to`)
+print(paste("egg_measures_revisions_mismatched: ", nrow(egg_measures_revisions_mismatched)))
+
+# Implement revisions from revisions table
+All_data_v4 <- All_data_v3 %>%
+  full_join(egg_measures_revisions, by = c("location", "Date")) %>%
+  mutate(Eggs_match_revision = ifelse(!is.na(Eggs) & !is.na(`Eggs from`) & Eggs == `Eggs from`,
+                       TRUE,
+                       FALSE),
+         Eggs_v5 = ifelse(Eggs_match_revision,
+                       `Eggs to`,
+                       Eggs)) %>%
+  select(-Eggs, -`Eggs from`, -`Eggs to`, -Eggs_match_revision) %>%
+  select(Date, Dorm, Plant, Leaf, location, Female_ID, Eggs = Eggs_v5,
+         N1, N2, N5, New_eA, Old_eA, nymph_origin, everything())
+
+# Check whether revisions implementation worked by rerunning inconsistency checks
+egg_status_v3 <- egg_conflict_check(All_data_v4)
+
+egg_text_conflict_data_v3 <- All_data_v4 %>%
+  group_by(row_number()) %>%
+  mutate(Female_ID = paste0(c(Dorm, "_", Female_ID), collapse = "")) %>%
+  ungroup() %>%
+  left_join(egg_status_v3, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
+  filter(egg_text_conflict) %>%
+  select(Date, Dorm, Plant, Leaf, Eggs)
+
+egg_status_missing_data_v3 <- All_data_v4 %>%
+  group_by(row_number()) %>%
+  mutate(Female_ID = paste0(c(Dorm, "_", Female_ID), collapse = "")) %>%
+  ungroup() %>%
+  left_join(egg_status_v3, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
+  filter(egg_status_missing, !grepl('NA|M', Female_ID)) %>%
+  select(Date, Dorm, Plant, Leaf, Eggs) #%>% print(n=Inf)
+
+print(paste("egg_text_conflict_data_eggs_revised:", nrow(egg_text_conflict_data_v3)))
+print(paste("egg_status_missing_data_eggs_revised:", nrow(egg_status_missing_data_v3)))
+
+#write_csv(egg_status_missing_data_eggs_revised, "egg_status_missing_data_eggs_revised_20200326.csv")
+
+```
+
+### Omit inconsistent egg measures from 7/4
+Luke used a much more conservative metric for number of eggs on 7/4; convert these measures to "E" for Dorms A, E, F
+```{r}
+egg_status_v4 <- egg_status_v3 %>%
+  mutate(Eggs_status = ifelse(Date == as.Date("2019-07-04") & grepl("^(A|E|F)", location) & grepl("[0-9]e ", Eggs_status),
+                              "E",
+                              Eggs_status))
+```
+
+## 2.5 - Create `revised_clutch_status_on_dates` table for second round of manual checking
+Create female locations on dates table for manual checking (as for Female IDs) and get a rough count of the number of clutches in this first round.
+```{r}
+# Only include clutches, not leaves that never had eggs and not leaves that only had nymphs
+any_eggs_not_just_nymphs <- egg_status_v4 %>%
+  select(location, Clutch_status = Eggs_status, Date) %>%
+  group_by(location) %>%
+    summarize(any_eggs_or_nymphs = any(!is.na(Clutch_status)),
+              any_eggs_not_just_nymphs = any(!is.na(Clutch_status) &
+                                               !(Clutch_status %in% c("N","0")))) %>%
+  ungroup() %>%
+  filter(any_eggs_not_just_nymphs)
+
+
+revised_clutch_status_on_dates <- egg_status_v4 %>%
+  left_join(any_eggs_not_just_nymphs, by = c("location")) %>%
+  filter(any_eggs_not_just_nymphs) %>%
+  select(location, Clutch_status = Eggs_status, Date) %>%
+  spread(key = Date, Clutch_status)
+
+# 402 clutches in revised data as of 2019/09/25
+print(paste(nrow(revised_clutch_status_on_dates), "clutches in revised data"))
+```
+
+## 2.6 - Define initiation dates (v1) to help with manual checks
+First pass initiation dates, before filling nymphs in duplicate entries and manual checks
+```{r}
+## 1: define initiation date, hatch date (taking into account "not hatched" notes)
+clutch_status_v1 <- egg_status_v4 %>%
+  left_join(any_eggs_not_just_nymphs, by = c("location")) %>%
+  filter(any_eggs_not_just_nymphs) %>%
+  select(location, Clutch_status = Eggs_status, Date) %>%
+  mutate(Egg_measures = ifelse(grepl("[1234567890]e", Clutch_status),
+                                Clutch_status,
+                               ifelse(!is.na(as.integer(Clutch_status)),
+                                      Clutch_status,
+                                      NA_character_)
+                               )
+         ) %>%
+  separate(Egg_measures, into = c("egg_num", "egg_len"), sep = "e", remove = FALSE) %>%
+  mutate(egg_num = as.integer(str_trim(egg_num)), 
+         egg_len = as.integer(str_trim(egg_len))) #%>%
+ # filter(!is.na(Egg_measures) & is.na(egg_len)) # check this if change anything upstream
+
+# 369 clutches had defined initiation dates as of 2019/09/25
+initiation_dates_v1 <- clutch_status_v1 %>%
+  filter(!is.na(Egg_measures) & Egg_measures != "0" | str_trim(Clutch_status, side = "both") == "E") %>%
+  group_by(location) %>%
+    filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(location, initiation_date = Date)
+
+print(paste(nrow(initiation_dates_v1), "clutches have defined initiation dates"))
+
+# 33 clutches didn't have an initiation date as of 2019/09/25 because they had no days where the eggs were measured
+#clutch_status_v1 %>% anti_join(initiation_dates) %>% distinct(location)
+#clutch_status_v1 %>% anti_join(initiation_dates) %>% arrange(location, Date) %>% print(n=Inf)
+
+print(paste(nrow(clutch_status_v1 %>% anti_join(initiation_dates_v1) %>% distinct(location)), 
+            "clutches didn't have an initiation date because they had no days where the eggs were measured"))
+
+```
+
+## 2.7 - Fix cases where nymph status is missing or inconsistent across multiple entries
+Similar process as with egg status above, but generalizing for differen columns in tibble. 
+Default is to group by date and location, but `perPlant`=TRUE allows to group by date and plant.
+```{r}
+text_conflict_check <- function(tibble, N, perPlant=FALSE){
+  # N = N1, N2, N5, NOr, Ants_on_leaf, Ants_on_plant (perPlant=TRUE)
+  require(dplyr)
+  if(perPlant == FALSE) {
+    # N = Eggs, N1, N2, N5, NOr, Ants_on_leaf
+    N_status <- tibble %>%
+      filter(!Leaf %in% c("S","A"), !substring(Leaf, nchar(Leaf)) == "A") %>%
+      group_by(Date, location) %>%
+      distinct((!!as.name(N)), .keep_all = TRUE) %>%
+      # mult entries for location/date but some are missing nymph data
+      mutate(N_need_filling = n() > 1) %>%
+      # unique text entries for location/date
+      mutate(num_unique_N = sum(!is.na(!!as.name(N)))) %>%
+      # flag cases where more than one non-NA value unique values for nymph
+      mutate(N_text_conflict = num_unique_N > 1) %>%
+      # flag cases where nymph status is ambiguous
+      mutate(N_status_missing = !is.na(!!as.name(N)) & 
+               is.na(suppressWarnings(as.integer(!!as.name(N))))) %>% 
+      ungroup() %>%
+      select(Date, location, N, N_need_filling, N_text_conflict, N_status_missing, num_unique_N)
+  } else {
+    # N = Ants_on_plant (perPlant=TRUE)
+    N_status <- tibble %>%
+      group_by(Date, Dorm, Plant) %>%
+      distinct((!!as.name(N)), .keep_all = TRUE) %>%
+      mutate(N_need_filling = n() > 1) %>%
+      mutate(num_unique_N = sum(!is.na(!!as.name(N)))) %>%
+      mutate(N_text_conflict = num_unique_N > 1) %>%
+      mutate(N_status_missing = !is.na(!!as.name(N)) & 
+               is.na(suppressWarnings(as.integer(!!as.name(N))))) %>% 
+      ungroup() %>%
+      select(Date, Dorm, Plant, N, N_need_filling, N_text_conflict, N_status_missing, num_unique_N)
+  }
+  return(N_status)
+}
+```
+
+```{r}
+N1_status <- text_conflict_check(All_data_v4, N = "N1") %>%
+  select(Date, location, N1, N1_need_filling = N_need_filling, 
+         N1_text_conflict = N_text_conflict, N1_status_missing = N_status_missing)
+
+print(paste("N1_need_filling: ", nrow(N1_status %>% filter(N1_need_filling))))
+print(paste("N1_text_conflict: ", nrow(N1_status %>% filter(N1_text_conflict))))
+print(paste("N1_status_missing: ", nrow(N1_status %>% filter(N1_status_missing))))
+
+N2_status <- text_conflict_check(All_data_v4, N = "N2") %>%
+  select(Date, location, N2, N2_need_filling = N_need_filling, 
+         N2_text_conflict = N_text_conflict, N2_status_missing = N_status_missing)
+
+print(paste("N2_need_filling: ", nrow(N2_status %>% filter(N2_need_filling))))
+print(paste("N2_text_conflict: ", nrow(N2_status %>% filter(N2_text_conflict))))
+print(paste("N2_status_missing: ", nrow(N2_status %>% filter(N2_status_missing))))
+
+N5_status <- text_conflict_check(All_data_v4, N = "N5") %>%
+  select(Date, location, N5, N5_need_filling = N_need_filling, 
+         N5_text_conflict = N_text_conflict, N5_status_missing = N_status_missing)
+
+print(paste("N5_need_filling: ", nrow(N5_status %>% filter(N5_need_filling))))
+print(paste("N5_text_conflict: ", nrow(N5_status %>% filter(N5_text_conflict))))
+print(paste("N5_status_missing: ", nrow(N5_status %>% filter(N5_status_missing))))
+
+# Adding nymph origin to nymph status so that I can check for ambiguous nymph origins with clutch status and better filter problematic clutches for calculating hatch success and nymph survival
+NOr_status <- text_conflict_check(All_data_v4, N = "nymph_origin") %>%
+  # flag cases where nymph_origin status is ambiguous
+  group_by(Date, location) %>%
+  mutate(NOr_ambiguous = !is.na(nymph_origin) & 
+           suppressWarnings(is.na(as.integer(nymph_origin)))) %>% 
+  ungroup() %>%
+  select(Date, location, nymph_origin, NOr_need_filling = N_need_filling, 
+         NOr_text_conflict = N_text_conflict, NOr_ambiguous)
+
+nymph_status <- N1_status %>% 
+  left_join(N2_status) %>% 
+  left_join(N5_status) %>% 
+  left_join(NOr_status)
+
+nymph_status_to_resolve <- nymph_status  %>% # should only include a handful of entries with "?" ambiguous entries for N1 or N2 (because did the revions by hand on 2019/09/26)
+  group_by(row_number()) %>%
+    filter(any(N1_need_filling, N1_text_conflict, N1_status_missing,
+               N2_need_filling, N2_text_conflict, N2_status_missing,
+               N5_need_filling, N5_text_conflict, N5_status_missing)) %>%
+  ungroup()
+# write_csv(nymph_status_to_resolve, "nymph_status_to_resolve.csv") ## manually added this to "nymph_status revisions" sheet in "Watershed_field_data_2019_ALL_local" and manually revised raw data 2019/09/26
+
+print(paste("nymph_status_to_resolve: ", nrow(nymph_status_to_resolve)))
+
+# checking number of ambiguous entries that need to be resolved
+nymph_text_conflict_data <- All_data_v4 %>% # nymph_text_conflict: 10 on 2019/09/24; 0 on 2019/09/26
+  left_join(N1_status, by = c("Date", "location", "N1")) %>%
+  left_join(N2_status, by = c("Date", "location", "N2")) %>%
+  left_join(N5_status, by = c("Date", "location", "N5")) %>%
+  group_by(row_number()) %>% 
+    filter(any(c(N1_text_conflict, N2_text_conflict, N5_text_conflict))) %>%
+  ungroup() %>%
+  select(Date, Dorm, Plant, Leaf, Female_ID, Eggs, N1, N2, N5, nymph_origin, Notes, N1_text_conflict, N2_text_conflict, N5_text_conflict)
+#write_csv(egg_text_conflict_data, "egg_text_conflict_data.csv")
+
+nymph_status_missing_data <- All_data_v4 %>% # nymph_status_missing: 17 on 2019/09/24; 5 on 2019/09/26 (all ok to ignore)
+  left_join(N1_status, by = c("Date", "location", "N1")) %>%
+  left_join(N2_status, by = c("Date", "location", "N2")) %>%
+  left_join(N5_status, by = c("Date", "location", "N5")) %>%
+  group_by(row_number()) %>% 
+  filter(any(c(N1_status_missing, N2_status_missing, N5_status_missing))) %>%
+  ungroup() %>%
+  select(Date, Dorm, Plant, Leaf, Female_ID, Eggs, N1, N2, N5, nymph_origin, Notes, N1_status_missing, N2_status_missing, N5_status_missing)
+#write_csv(egg_status_missing_data, "egg_status_missing_data.csv")
+
+print("checking number of ambiguous nymph entries that need to be resolved:")
+print(paste("nymph_text_conflict_data: ", nrow(nymph_text_conflict_data)))
+print(paste("nymph_status_missing_data: ", nrow(nymph_status_missing_data)))
+
+# clutch_status_v1 should have no duplicate entries for location and date, so I can safely left_join the nymph status information
+print("clutch_status_v1 should have no duplicate entries for location and date, so I can safely left_join the nymph status information")
+print(paste("instances with more than one entry per location and date for in clutch_status_v1: ",
+            nrow(clutch_status_v1 %>% group_by(Date, location) %>% summarize(n = n()) %>% ungroup() %>% filter(n < 1))))
+```
+
+## 2.8 - Define hatch dates (v1) to help with manual checks
+Define hatch date for this dataset:
+First day that n1 appear unless "not hatched" in notes -> check manually
+  - roughly: filter(!is.na(N1) & !grepl("not hatched", Notes))
+```{r}
+clutch_nymph_status_v1 <- clutch_status_v1 %>% 
+  left_join(nymph_status, by = c("Date", "location")) %>%
+  select(location, Date, Clutch_status, Egg_measures, egg_num, egg_len, N1, N2, N5, nymph_origin, NOr_ambiguous) %>%
+  arrange(location, Date)
+
+hatch_dates_v1 <- clutch_nymph_status_v1 %>%
+  filter(!is.na(as.integer(N1)) & N1 != 0) %>% 
+  # & notes that don't mention "not hatched yet" <- manually checked below with "check_hatch_date" and revised with "check_hatch_date_revisions"
+  group_by(location) %>%
+    filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(location, hatch_date = Date)
+
+print("Hatch_dates v1 (filled in nymphs but not yet incorporating 'not hatched' notes):")
+print(paste("hatch_dates: ", nrow(hatch_dates_v1)))
+```
+
+## 2.9 - Manually check hatch dates using the "not hatched" notes from field using `check_hatch_date` sheet
+Use the "not hatched" notes (from original field notes; typically b/c nymphs present but they are immigrants, not hatched from the focal clutch) to inform first pass of hatch date revisions
+Again these changes were specified in the `check_hatch_date` sheet and are applied here without changing the original data file.
+```{r}
+# Create `check_hatch_date` sheet for checking "not hatched" notes and suggesting manual revisions
+check_hatch_date <- All_data_v4  %>%
+  filter(grepl("not", Notes, ignore.case = TRUE), grepl("hatch", Notes, ignore.case = TRUE)) %>%
+  distinct(location)
+#write_csv(check_hatch_date, "check_hatch_date_tmp.csv")
+```
+
+### Revise initiation dates and hatch dates (v2) based on `check_hatch_date` manual check
+```{r}
+# Revise initiation dates and hatch dates based on `check_hatch_date` manual check
+check_hatch_date_revisions <- read_xlsx(in_filename, sheet = "check_hatch_date", col_types = c("text", "text", "date", "date", "text", "text", "text", "text")) %>%
+  select(location, revised_hatch_date_date, revised_hatch_date_text) %>%
+  mutate(revised_hatch_date_date = date(revised_hatch_date_date))
+
+hatch_dates_v2 <- hatch_dates_v1 %>% 
+  left_join(check_hatch_date_revisions, by="location") %>%
+  mutate(hatch_date = if_else(!is.na(revised_hatch_date_date),
+                              revised_hatch_date_date,
+                              if_else(revised_hatch_date_text %in% c("never hatched", "no eggs"),
+                                      as.Date(NA),
+                                      hatch_date))) %>%
+  select(location, hatch_date)
+
+# Just checking that all of the clutches determined to have no eggs don't have initiation dates
+# (this shouldn't do anything if so)
+initiation_dates_v2 <- initiation_dates_v1 %>% 
+  left_join(check_hatch_date_revisions, by="location") %>%
+  mutate(initiation_date = if_else(!is.na(revised_hatch_date_text) & revised_hatch_date_text == "no eggs",
+                            as.Date(NA),
+                            initiation_date)) %>%
+  select(location, initiation_date)
+
+print("Hatch_dates (v2) after incorporating 'not hatched' notes:")
+print(paste("hatch_dates_v2: ", nrow(hatch_dates_v2)))
+print("Initiation_dates (v2) after manually checking:")
+print(paste("initiation_dates_v2: ", nrow(initiation_dates_v2)))
+```
+
+## 2.10 - Manually check clutches with short initiation-hatch intervals
+Changes were specified in the `short_unhatched_days_check` sheet and are applied here without changing the original data file.
+
+Criteria used to manually flag unusually short init-hatch intervals:
+- outlier starting egg number (suggests I'm missing first obs)
+- spurious 0 entry for Eggs
+- immigration of N1 from another leaf
+- mother not accounted for on previous days
+
+## 2.11 - Use `short_unhatched_days_check` sheet to revise initiation and hatch dates (v3)
+*NOTE:* I just use these revisions to adjust the female guarding duration data, rather than revising the "All_data_revised_eggs_revised". *the All_data tibble is thus not a perfect source of nymph counts*
+
+### Implement initiation date (v3) revisions
+Where it was obvious that the initiation date was overlooked in the field (based on above criteria), I specified that an "E" be entered at that location on the suspected initiation date.
+```{r}
+# Use "short_unhatched_days_check" sheet to further revise hatch dates
+short_unhatched_check_revisions <- read_xlsx(in_filename, sheet = "short_unhatched_days_check") %>%#, col_types = c("text", "text", "date", "date", "text", "text", "text", "text")) %>%
+  select(location, Egg_revisions, Hatch_revised, Initiation_revised, Female_revision_ID, Female_revision_date, Omit_for_abandon_time)
+
+short_unhatched_check_revisions_eggs <- short_unhatched_check_revisions %>%
+  filter(grepl("no eggs|initiated|hatched",Egg_revisions) | Omit_for_abandon_time == "yes", !grepl("manually|fixed", Egg_revisions)) %>% print(n=Inf)
+
+initiation_dates_v3 <- initiation_dates_v2 %>% 
+  left_join(short_unhatched_check_revisions, by="location") %>%
+  mutate(initiation_date_revised = if_else(grepl("no eggs|initiated|hatched",Egg_revisions) & !grepl("manually|fixed", Egg_revisions),
+                                      if_else(Egg_revisions == "no eggs",
+                                              as.Date(NA),
+                                              if_else(!is.na(Initiation_revised),
+                                                      as.Date(Initiation_revised),
+                                                      initiation_date)
+                                      ),
+                                      initiation_date)) %>%
+  filter(is.na(Omit_for_abandon_time)) %>%
+  arrange(location) %>%
+  select(location, initiation_date, initiation_date_revised) %>% # check that this worked before proceeding!
+  select(location, initiation_date = initiation_date_revised)
+
+print("Initiation_dates (v3) after manually checking unusually short unhatched days:")
+print(paste("initiation_dates_v3: ", nrow(initiation_dates_v3)))
+```
+
+### Implement hatch date (v3) revisions
+Where it was obvious that the hatch date (v2) was incorrect (e.g. immigration of N1), I specified a new hatch date (v3). *Note that only hatch date is thus revised, and not the nymph status in `All_data`.* _So if I need to have accurate nymph status on specific dates for downstream analysis, I would need to adjust this to add a "N" or some similar nymph placeholder for those location-dates._
+```{r}
+hatch_dates_v3 <- hatch_dates_v2 %>% 
+  left_join(short_unhatched_check_revisions, by="location") %>%
+  group_by(location) %>%
+  mutate(hatch_date_revised = if_else(grepl("no eggs|initiated|hatched",Egg_revisions) & !grepl("manually|fixed", Egg_revisions),
+                              if_else(Egg_revisions %in% c("never hatched", "no eggs"),
+                                      as.Date(NA),
+                                      if_else(!is.na(Hatch_revised),
+                                              as.Date(Hatch_revised),
+                                              hatch_date)
+                                      ),
+                              hatch_date)) %>%
+  ungroup() %>%
+  filter(is.na(Omit_for_abandon_time)) %>%
+  select(location, hatch_date, hatch_date_revised) %>% # check that this worked before proceeding!
+  select(location, hatch_date = hatch_date_revised)
+
+print("Hatch_dates (v3) after manually checking unusually short unhatched days:")
+print(paste("hatch_dates_v3: ", nrow(hatch_dates_v3)))
+```
+
+### Specify which clutches should be omitted from desertion date analyses
+- If we likely missed first several days of clutch, unclear how early initiated, and unclear who was present at initiation.
+- Or unclear whether eggs never hatched
+```{r}
+omit_for_abandon_time <- short_unhatched_check_revisions %>%
+  filter(!is.na(Omit_for_abandon_time)) %>%
+  select(location, Omit_for_abandon_time)
+print(paste("Clutches with ambiguous init/hatch dates to omit from desertion date analysis: ", nrow(omit_for_abandon_time)))
+```
+
+## 2.10 - Use `short_unhatched_days_check` sheet to revise Female IDs
+Add females to `All_data` where they were not originally observed based on evidence from short init-hatch interval.
+When a female was guarding shortly after initiation but neither the eggs nor the mother was observed on the revised day of initiation, it was assumed that we overlookoed that location in the field on that day, so she was added accordingly. These revisions are tracked in the `short_unhatched_days_check` sheet.
+```{r}
+# Add females from short_unhatched_check_revisions to `All_data` tibble
+short_unhatched_check_revisions_moms <- short_unhatched_check_revisions %>% 
+  filter(!is.na(Female_revision_ID) & Female_revision_ID != "?") %>%
+  separate_rows(Female_revision_date, sep = ",") %>%
+  mutate(Female_revision_date = as.Date(str_trim(Female_revision_date, side = "both"))) %>%
+  select(Date = Female_revision_date, location, Female_revision_ID) %>%
+  separate(location, c("DormPlant", "Leaf"), "_", remove = FALSE) %>%
+  mutate(Dorm = substr(DormPlant, 1,1),
+         Plant = substring(DormPlant, 2)) %>%
+  select(Date, location_revision = location, Dorm, Plant, Leaf, Female_revision_ID)
+  
+
+All_data_v5 <- All_data_v4 %>% 
+  full_join(short_unhatched_check_revisions_moms, by = c("Date", "Dorm", "Plant", "Leaf")) %>%
+  mutate(Female_ID = ifelse(!is.na(Female_revision_ID),
+                            paste0(Dorm, "_", Female_revision_ID),
+                            ifelse(!is.na(Female_ID),
+                                   paste0(Dorm, "_", Female_ID),
+                                   NA)),
+         location = ifelse(is.na(location_revision),
+                           location,
+                           ifelse(is.na(location),
+                                  location_revision,
+                                  NA)),
+         Eggs = ifelse(!is.na(Female_revision_ID),
+                       "E",
+                       Eggs)) %>%
+  select(-Female_revision_ID, -location_revision)
+```
+
+## 2.11 Update clutch_status data using revised `All_data` table
+```{r}
+egg_status_v5 <- egg_conflict_check(All_data_v5) %>%
+  select(Date, location, Eggs_status, eggs_need_filling, egg_text_conflict, egg_status_missing) %>%
+  # Luke used a much more conservative metric for number of eggs on 7/4; convert these measures to "E" for Dorms A, E, F
+  mutate(Eggs_status = ifelse(Date == as.Date("2019-07-04") & grepl("^(A|E|F)", location) & grepl("[0-9]e ", Eggs_status),"E",Eggs_status))
+
+# Only include clutches, not leaves that never had eggs and not leaves that only had nymphs
+any_eggs_not_just_nymphs_v2 <- egg_status_v5 %>%
+  select(location, Clutch_status = Eggs_status, Date) %>%
+  group_by(location) %>%
+    summarize(any_eggs_or_nymphs = any(!is.na(Clutch_status)),
+              any_eggs_not_just_nymphs = any(!is.na(Clutch_status) &
+                                               !(Clutch_status %in% c("N","0")))) %>%
+  ungroup() %>%
+  filter(any_eggs_not_just_nymphs)
+
+# define initiation date, hatch date
+clutch_status_v2 <- egg_status_v4 %>%
+  left_join(any_eggs_not_just_nymphs_v2, by = c("location")) %>%
+  filter(any_eggs_not_just_nymphs) %>%
+  select(location, Clutch_status = Eggs_status, Date) %>%
+  mutate(Egg_measures = ifelse(grepl("[1234567890]e", Clutch_status),
+                                Clutch_status,
+                               ifelse(!is.na(as.integer(Clutch_status)),
+                                      Clutch_status,
+                                      NA_character_)
+                               )
+         ) %>%
+  separate(Egg_measures, into = c("egg_num", "egg_len"), sep = "e", remove = FALSE) %>%
+  mutate(egg_num = as.integer(str_trim(egg_num)), 
+         egg_len = as.integer(str_trim(egg_len))) #%>%
+ # filter(!is.na(Egg_measures) & is.na(egg_len)) # check this if change anything upstream
+
+clutch_nymph_status_v2 <- clutch_status_v2 %>% 
+  left_join(nymph_status, by = c("Date", "location")) %>%
+  select(location, Date, Clutch_status, Egg_measures, egg_num, egg_len, N1, N2, N5, nymph_origin, nymph_origin, NOr_ambiguous) %>%
+  arrange(location, Date)
+```
+
