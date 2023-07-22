@@ -1,5 +1,5 @@
 ---
-title: '01 - TreehopperFitness: Data prep'
+title: '01 - TreehopperFitness: Quality control'
 author: "Micah Fletcher"
 date: '`r Sys.Date()`'
 output: 
@@ -14,10 +14,6 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
 
 library(kableExtra)   ## Needed if rendering tables
 ```
-
-<!-- This file will not execute by itself. It should be called within the  -->
-<!-- runfile to render the final report. You can arrange figures, add explanations, -->
-<!-- and do other aesthetic tweaks here. -->
   
 ```{=html}
 <style type="text/css">
@@ -150,7 +146,7 @@ Days_observed_dupStatus <- female_roster_days_dupStatus %>%
   arrange(Dorm, Days_observed)
 
 # used 20200319 version
-write_csv(Days_observed_dupStatus, here("data/manual_check/Days_observed_dupStatus.csv"))
+# write_csv(Days_observed_dupStatus, here("data/manual_check/Days_observed_dupStatus.csv"))
 ```
 
 ## 1.3 - Revise Female_ID using `Female_ID revisions dupStatus` sheet
@@ -319,14 +315,14 @@ egg_text_conflict_data_v1 <- All_data_v2 %>% # egg_text_conflict: 39 on 2019/09/
   left_join(egg_status_v1, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
   filter(egg_text_conflict) %>%
   select(Date, Dorm, Plant, Leaf, Eggs)
-write_csv(egg_text_conflict_data_v1, here("data/manual_check/egg_text_conflict_data.csv"))
+# write_csv(egg_text_conflict_data_v1, here("data/manual_check/egg_text_conflict_data.csv"))
 
 # Create table for entries with missing data that need to be resolved
 egg_status_missing_data_v1 <- All_data_v2 %>% # egg_status_missing: 219 on 2019/09/24
   left_join(egg_status_v1, by = c("Date", "location", "Eggs" = "Eggs_status")) %>%
   filter(egg_status_missing, !grepl('NA|M', Female_ID)) %>%
   select(Date, Dorm, Plant, Leaf, Eggs)
-write_csv(egg_status_missing_data_v1, here("data/manual_check/egg_status_missing_data.csv"))
+# write_csv(egg_status_missing_data_v1, here("data/manual_check/egg_status_missing_data.csv"))
 
 print("Conflicts and missing data before implementing manual revisions:")
 print(paste("egg_text_conflict_data:", nrow(egg_text_conflict_data_v1)))
@@ -394,7 +390,7 @@ print(paste("egg_text_conflict_data_eggs_revised:", nrow(egg_text_conflict_data_
 print(paste("egg_status_missing_data_eggs_revised:", nrow(egg_status_missing_data_v2)))
 
 # 20200326 version was used
-write_csv(egg_status_missing_data_eggs_revised, here("data/manual_check/egg_status_missing_data_eggs_revised.csv"))
+# write_csv(egg_status_missing_data_eggs_revised, here("data/manual_check/egg_status_missing_data_eggs_revised.csv"))
 ```
 
 ## 2.4 - Import and implement `egg measures` revisions
@@ -447,8 +443,8 @@ egg_status_missing_data_v3 <- All_data_v4 %>%
 print(paste("egg_text_conflict_data_eggs_revised:", nrow(egg_text_conflict_data_v3)))
 print(paste("egg_status_missing_data_eggs_revised:", nrow(egg_status_missing_data_v3)))
 
-#write_csv(egg_status_missing_data_eggs_revised, "egg_status_missing_data_eggs_revised_20200326.csv")
-
+# 20200326 version was used
+# write_csv(egg_status_missing_data_eggs_revised, here("data/manual_check/egg_status_missing_data_eggs_revised.csv")
 ```
 
 ### Omit inconsistent egg measures from 7/4
@@ -610,7 +606,7 @@ nymph_status_to_resolve <- nymph_status  %>% # should only include a handful of 
                N2_need_filling, N2_text_conflict, N2_status_missing,
                N5_need_filling, N5_text_conflict, N5_status_missing)) %>%
   ungroup()
-# write_csv(nymph_status_to_resolve, "nymph_status_to_resolve.csv") ## manually added this to "nymph_status revisions" sheet in "Watershed_field_data_2019_ALL_local" and manually revised raw data 2019/09/26
+# write_csv(nymph_status_to_resolve, here("data/manual_check/nymph_status_to_resolve.csv") ## manually added this to "nymph_status revisions" sheet in "Watershed_field_data_2019_ALL_local" and manually revised raw data 2019/09/26
 
 print(paste("nymph_status_to_resolve: ", nrow(nymph_status_to_resolve)))
 
@@ -623,7 +619,7 @@ nymph_text_conflict_data <- All_data_v4 %>% # nymph_text_conflict: 10 on 2019/09
     filter(any(c(N1_text_conflict, N2_text_conflict, N5_text_conflict))) %>%
   ungroup() %>%
   select(Date, Dorm, Plant, Leaf, Female_ID, Eggs, N1, N2, N5, nymph_origin, Notes, N1_text_conflict, N2_text_conflict, N5_text_conflict)
-#write_csv(egg_text_conflict_data, "egg_text_conflict_data.csv")
+# write_csv(egg_text_conflict_data, "egg_text_conflict_data.csv")
 
 nymph_status_missing_data <- All_data_v4 %>% # nymph_status_missing: 17 on 2019/09/24; 5 on 2019/09/26 (all ok to ignore)
   left_join(N1_status, by = c("Date", "location", "N1")) %>%
@@ -633,7 +629,7 @@ nymph_status_missing_data <- All_data_v4 %>% # nymph_status_missing: 17 on 2019/
   filter(any(c(N1_status_missing, N2_status_missing, N5_status_missing))) %>%
   ungroup() %>%
   select(Date, Dorm, Plant, Leaf, Female_ID, Eggs, N1, N2, N5, nymph_origin, Notes, N1_status_missing, N2_status_missing, N5_status_missing)
-#write_csv(egg_status_missing_data, "egg_status_missing_data.csv")
+# write_csv(egg_status_missing_data, "egg_status_missing_data.csv")
 
 print("checking number of ambiguous nymph entries that need to be resolved:")
 print(paste("nymph_text_conflict_data: ", nrow(nymph_text_conflict_data)))
@@ -675,7 +671,7 @@ Again these changes were specified in the `check_hatch_date` sheet and are appli
 check_hatch_date <- All_data_v4  %>%
   filter(grepl("not", Notes, ignore.case = TRUE), grepl("hatch", Notes, ignore.case = TRUE)) %>%
   distinct(location)
-#write_csv(check_hatch_date, "check_hatch_date_tmp.csv")
+# write_csv(check_hatch_date, "check_hatch_date_tmp.csv")
 ```
 
 ### Revise initiation dates and hatch dates (v2) based on `check_hatch_date` manual check
@@ -855,5 +851,333 @@ clutch_nymph_status_v2 <- clutch_status_v2 %>%
   left_join(nymph_status, by = c("Date", "location")) %>%
   select(location, Date, Clutch_status, Egg_measures, egg_num, egg_len, N1, N2, N5, nymph_origin, nymph_origin, NOr_ambiguous) %>%
   arrange(location, Date)
+```
+
+# 3 - Revise ant data reproducibly
+Revised ant data and updated All_data_v5 to All_data_v6
+Note that the only changes from All_data_v5 to All_data_v6 were adding columns for ant data and all variables derived from All_data_v5 should be safe to left_join with All_data_v6
+
+## 3.1 - Fill empty entries and resolve text conflicts
+As for eggs and nymphs above
+```{r}
+## find plants where ants were not filled in for all duplicate leaf or plant entries
+## for duplicate plant entries
+plant_ants_flagged_v1 <- text_conflict_check(All_data_v5, N="Ants_on_plant", perPlant=TRUE) %>%
+  select(Date, Dorm, Plant, Ants_on_plant, 
+         plant_ants_need_filling = N_need_filling,
+         plant_ants_text_conflict = N_text_conflict,
+         num_unique_plant_ants = num_unique_N)
+
+plant_ants_fill_source_v1 <- plant_ants_flagged_v1 %>%
+  filter(plant_ants_need_filling, !plant_ants_text_conflict, !is.na(Ants_on_plant)) %>%
+  select(Date, Dorm, Plant, Ants_on_plant_fill = Ants_on_plant, plant_ants_fill_from_src = plant_ants_need_filling)
+
+All_data_v5_plant_ants_v1 <- All_data_v5 %>%
+  left_join(plant_ants_fill_source_v1, by=c("Date", "Dorm", "Plant")) %>%
+  mutate(Ants_on_plant_filled = ifelse(is.na(plant_ants_fill_from_src),
+                              Ants_on_plant,
+                              Ants_on_plant_fill))
+
+# manually check that Ants_on_plant_filled is what you expect before replacing Ants_on_plant
+All_data_v5_plant_ants_v1 <- All_data_v5_plant_ants_v1  %>% mutate(Ants_on_plant = Ants_on_plant_filled) %>% select(-Ants_on_plant_filled)
+
+## for duplicate leaf entries
+leaf_ants_flagged_v1 <- text_conflict_check(All_data_v5, N="Ants_on_leaf", perPlant=FALSE) %>%
+  select(Date, location, Ants_on_leaf,
+         leaf_ants_need_filling = N_need_filling,
+         leaf_ants_text_conflict = N_text_conflict,
+         num_unique_leaf_ants = num_unique_N)
+
+leaf_ants_fill_source_v1 <- leaf_ants_flagged_v1 %>%
+  filter(leaf_ants_need_filling, !leaf_ants_text_conflict, !is.na(Ants_on_leaf)) %>%
+  select(Date, location, Ants_on_leaf_fill = Ants_on_leaf, leaf_ants_fill_from_src = leaf_ants_need_filling)
+
+All_data_v5_plant_leaf_ants_v1 <- All_data_v5_plant_ants_v1 %>%
+  left_join(leaf_ants_fill_source_v1, by=c("Date", "location")) %>%
+  mutate(Ants_on_leaf_filled = ifelse(is.na(leaf_ants_fill_from_src),
+                                       Ants_on_leaf,
+                                       Ants_on_leaf_fill))
+
+# manually check that Ants_on_leaf_filled is what you expect before replacing Ants_on_leaf
+All_data_v5_plant_leaf_ants_v2 <- All_data_v5_plant_leaf_ants_v1 %>% mutate(Ants_on_leaf = Ants_on_leaf_filled) %>% select(-Ants_on_leaf_filled)
+```
+
+## 3.2 - Check that filled empty entries and text conflicts have been resolved
+```{r}
+# check that the automatic filling worked and address the text conflicts manually in a separate spreadsheet
+plant_ants_flagged_v2 <- text_conflict_check(All_data_v5_plant_leaf_ants_v2,
+                                             N="Ants_on_plant", perPlant=TRUE) %>%
+  select(Date, Dorm, Plant, Ants_on_plant, 
+         plant_ants_need_filling = N_need_filling,
+         plant_ants_text_conflict = N_text_conflict,
+         num_unique_plant_ants = num_unique_N)
+
+## for duplicate leaf entries
+leaf_ants_flagged_v2 <- text_conflict_check(All_data_v5_plant_leaf_ants_v2,
+                                            N="Ants_on_leaf", perPlant=FALSE) %>%
+  select(Date, location, Ants_on_leaf,
+         leaf_ants_need_filling = N_need_filling,
+         leaf_ants_text_conflict = N_text_conflict,
+         num_unique_leaf_ants = num_unique_N)
+
+ant_text_conflict_v2 <- filter(plant_ants_flagged_v2, plant_ants_text_conflict) %>%
+  bind_rows(filter(leaf_ants_flagged_v2, leaf_ants_text_conflict))
+  
+# write_csv(ant_text_conflict, "ant_text_conflict.csv") # resolved 2019-10-08
+```
+
+## 3.3 - Split ant species into separate columns, check and revise ant counts per species and total
+Note: If the total number of ants on plant is less than the sum of the leaves, recalculated ants_P (i.e. ants on plant); ants on stem could be problematic with this, since some groups of ants are assigned to multiple females, but we tried our best to write in the totals for any plant that had such an ambiguous case, so I think I can just omit stem and apex
+```{r}
+All_data_v5_plant_leaf_ants_split_v1 <- All_data_v5_plant_leaf_ants_v2 %>% 
+  mutate(Ants_on_plant_preprocessed = str_to_lower(str_replace_all(str_trim(Ants_on_plant), pattern = " ", replacement = ""))) %>% # remove all whitespace
+  mutate(sbP = as.numeric(str_extract(str_extract(Ants_on_plant, "([0-9]+)sb"), "[0-9]+")),
+         brbP = as.numeric(str_extract(str_extract(Ants_on_plant, "([0-9]+)brb"), "[0-9]+")),
+         brrbP = as.numeric(str_extract(str_extract(Ants_on_plant, "([0-9]+)brrb"), "[0-9]+")),
+         srP = as.numeric(str_extract(str_extract(Ants_on_plant, "([0-9]+)sr"), "[0-9]+")),
+         lrP = as.numeric(str_extract(str_extract(Ants_on_plant, "([0-9]+)lr"), "[0-9]+"))) %>%
+  mutate(sbL = as.numeric(str_extract(str_extract(Ants_on_leaf, "([0-9]+)sb"), "[0-9]+")),
+         brbL = as.numeric(str_extract(str_extract(Ants_on_leaf, "([0-9]+)brb"), "[0-9]+")),
+         brrbL = as.numeric(str_extract(str_extract(Ants_on_leaf, "([0-9]+)brrb"), "[0-9]+")),
+         srL = as.numeric(str_extract(str_extract(Ants_on_leaf, "([0-9]+)sr"), "[0-9]+")),
+         lrL = as.numeric(str_extract(str_extract(Ants_on_leaf, "([0-9]+)lr"), "[0-9]+")))# %>%
+  #select(-Ants_on_plant, -Ants_on_leaf, -Ants_on_plant_preprocessed)
+
+All_data_v5_plant_leaf_ants_split_v1_revisions <- All_data_v5_plant_leaf_ants_split_v1 %>% 
+  group_by(Date, Dorm, Plant, Leaf) %>%
+    filter(row_number() == 1) %>%
+  ungroup() %>%
+  group_by(Date, Dorm, Plant) %>%
+    mutate(sbP_revise = ifelse(!grepl("_S|_A", location),
+                               ifelse(is.na(sbP) & !all(is.na(sbL)) | sbP < sum(sbL, na.rm = TRUE),
+                                      sum(sbL, na.rm = TRUE),
+                                      sbP),
+                               sbP),
+              brbP_revise = ifelse(!grepl("_S|_A", location),
+                               ifelse(is.na(brbP) & !all(is.na(brbL)) | brbP < sum(brbL, na.rm = TRUE),
+                                      sum(brbL, na.rm = TRUE),
+                                      brbP),
+                               brbP),
+              brrbP_revise = ifelse(!grepl("_S|_A", location),
+                               ifelse(is.na(brrbP) & !all(is.na(brrbL)) | brrbP < sum(brrbL, na.rm = TRUE),
+                                      sum(brrbL, na.rm = TRUE),
+                                      brrbP),
+                               brrbP),
+              lrP_revise = ifelse(!grepl("_S|_A", location),
+                               ifelse(is.na(lrP) & !all(is.na(lrL)) | lrP < sum(lrL, na.rm = TRUE),
+                                      sum(lrL, na.rm = TRUE),
+                                      lrP),
+                               lrP),
+              srP_revise = ifelse(!grepl("_S|_A", location),
+                               ifelse(is.na(srP) & !all(is.na(srL)) | srP < sum(srL, na.rm = TRUE),
+                                      sum(srL, na.rm = TRUE),
+                                      srP),
+                               srP)) %>%
+  ungroup() %>%
+  select(Date, location, sbP_revise, brbP_revise, brrbP_revise, srP_revise, lrP_revise) %>%
+  filter(!is.na(location))
+
+# Combine revised ant counts for each species with All_data to create `All_data_v6`
+All_data_v6 <- All_data_v5_plant_leaf_ants_split_v1 %>% 
+  left_join(All_data_v5_plant_leaf_ants_split_v1_revisions, by = c("Date", "location")) %>%
+  select(-sbP, -brbP, -brrbP, -srP, -lrP) %>%
+  rename(sbP = sbP_revise, brbP = brbP_revise, brrbP = brrbP_revise, srP = srP_revise, lrP = lrP_revise) %>%
+  group_by(row_number()) %>%
+    mutate(ants_L = sum(sbL, brbL, brrbL, srL, lrL, na.rm = TRUE),
+           ants_P = sum(sbP, brbP, brrbP, srP, lrP, na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(-`row_number()`, -Ants_on_plant, -Ants_on_leaf, -Ants_on_plant_fill, -plant_ants_fill_from_src, -Ants_on_leaf_fill, -leaf_ants_fill_from_src, -Ants_on_plant_preprocessed)
+```
+
+# 4 - Final pass at revising clutch status
+
+## 4.1 - Calculate female visit order to help with visualizing egg guarding timelines
+```{r}
+visit_order_v1 <- All_data_v6 %>%
+  filter(!is.na(Female_ID), !grepl('NA|M|_E|_N|N (dup)', Female_ID)) %>%
+  select(Date, location, Female_ID) %>%
+  arrange(location, Date) %>%
+  group_by(location, Female_ID) %>%
+    filter(row_number() == 1) %>%
+  ungroup() %>%
+  group_by(location) %>%
+    mutate(visit_order = rank(Date, ties.method = "min")) %>%
+  ungroup() %>%
+  select(-Date)
+
+# this just helps with plotting timeline, doesn't deal with visit order ties
+visitor_rank_v1 <- All_data_v6 %>%
+  filter(!is.na(Female_ID), !grepl('NA|M|_E|_N|N (dup)', Female_ID)) %>%
+  filter(!grepl("_S", location)) %>%
+  select(Date, location, Female_ID) %>%
+  arrange(location, Date) %>%
+  group_by(location, Female_ID) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  group_by(location) %>%
+  mutate(visitor_rank = rank(Date, ties.method = "random")) %>%
+  ungroup() %>%
+  select(-Date)
+
+Female_location_visit_order_v1 <- All_data_v6 %>%
+  filter(!is.na(Female_ID), !grepl('NA|M|_E|_N|N (dup)', Female_ID)) %>%
+  filter(!grepl("_S", location)) %>%
+  select(Date, location, Female_ID) %>%
+  arrange(location, Date) %>%
+  left_join(visit_order_v1) %>%
+  left_join(visitor_rank_v1)
+```
+
+## 4.2 - Identify "clutch fate": when leaves die / go missing / are 100% eaten
+```{r}
+## I think it would be helpful to identify when leaves die / go missing / are 100% eaten
+Eggs_eaten_dates_v1 <- clutch_status_v2 %>%
+  select(location, Date, Clutch_status) %>%
+  mutate(eggs_eaten = grepl("eaten", Clutch_status, ignore.case = TRUE)) %>%
+  filter(eggs_eaten) %>%
+  group_by(location) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(location, eggs_eaten_date = Date)
+
+Leaf_missing_dates_v1 <- clutch_status_v2 %>%
+  select(location, Date, Clutch_status) %>%
+  mutate(leaf_missing_date = grepl("missing", Clutch_status, ignore.case = TRUE)) %>%
+  filter(leaf_missing_date) %>%
+  group_by(location) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(location, leaf_missing_date = Date)
+
+Leaf_dead_dates_v1 <- clutch_status_v2 %>%
+  select(location, Date, Clutch_status) %>%
+  mutate(leaf_dead_date = grepl("dead", Clutch_status, ignore.case = TRUE)) %>%
+  filter(leaf_dead_date) %>%
+  group_by(location) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(location, leaf_dead_date = Date)
+
+egg_fate_dates_v1 <- clutch_nymph_status_v2 %>%
+  left_join(Eggs_eaten_dates_v1) %>%
+  left_join(Leaf_missing_dates_v1) %>%
+  left_join(Leaf_dead_dates_v1) %>%
+  group_by(location) %>%
+    filter(row_number() == 1) %>%
+    mutate(egg_fate = ifelse(any(!is.na(c(eggs_eaten_date, leaf_missing_date, leaf_dead_date))),
+                               ifelse(which.min(c(eggs_eaten_date, leaf_missing_date, leaf_dead_date)) == 1, "Eaten/hatched",
+                                       ifelse(which.min(c(eggs_eaten_date, leaf_missing_date, leaf_dead_date)) == 2, "Missing",
+                                               ifelse(which.min(c(eggs_eaten_date, leaf_missing_date, leaf_dead_date)) == 3, "Dead",
+                                                       NA_character_))),NA_character_)) %>%
+  mutate(egg_fate_date = if_else(any(!is.na(c(eggs_eaten_date, leaf_missing_date, leaf_dead_date))),
+                            min(c(eggs_eaten_date, leaf_missing_date, leaf_dead_date), na.rm = TRUE),
+                            as.Date(NA))) %>%
+  select(location, egg_fate, egg_fate_date)
+```
+
+## 4.3 - Finalizing initiation and hatch dates (plus leaf fate etc) = "clutch status"
+```{r}
+clutch_status_init_hatch_v1 <- clutch_nymph_status_v2 %>%
+  left_join(initiation_dates_v3, by="location") %>%
+  left_join(hatch_dates_v3, by="location") %>%
+  left_join(egg_fate_dates_v1, by="location") %>%
+  mutate(initiation_date_binary = Date == initiation_date,
+         hatch_date_binary = Date == hatch_date,
+         egg_fate_date_binary = Date == egg_fate_date) %>%
+  left_join(Female_location_visit_order_v1, by=c("Date", "location")) %>%
+  select(location, Date, Female_ID, visit_order, Clutch_status, egg_num, egg_len, 
+         N1, N2, N5, nymph_origin, NOr_ambiguous, initiation_date, initiation_date_binary, hatch_date, hatch_date_binary, visitor_rank,
+         egg_fate, egg_fate_date, egg_fate_date_binary)
+
+clutch_status_init_hatch_v1 %>% filter(egg_len > 50)
+clutch_status_init_hatch_v1 %>% filter(location == "A61_10") %>% print(n=Inf)
+ 
+# dates <- as.Date((clutch_status_init_hatch_v1 %>%
+#   distinct(Date) %>% arrange(Date))$Date)
+
+clutch_status_last_date_measured_v1 <- clutch_status_init_hatch_v1 %>%
+  arrange(location, desc(Date)) %>%
+  group_by(location) %>%
+    filter(!is.na(egg_len|egg_num)) %>%
+    filter(row_number() == 1) %>%
+  ungroup()
+
+clutch_status_init_hatch_labels_v1 <- clutch_status_init_hatch_v1 %>%
+  mutate(init_label = ifelse(initiation_date_binary,
+                             "O",
+                             NA_character_),
+         hatch_label = ifelse(hatch_date_binary,
+                              "H",
+                              NA_character_),
+         fate_label = ifelse(egg_fate_date_binary,
+                              egg_fate,
+                              NA_character_)) %>%
+  group_by(location, Female_ID) %>%
+    arrange(location, Female_ID, desc(Date)) %>%
+    mutate(Female_ID_label = ifelse(Date == max(Date),
+                                    Female_ID,
+                                    NA_character_)) %>%
+  ungroup() %>%
+  group_by(location) %>%
+    mutate(unhatched_days = ifelse(hatch_date_binary, 
+                                   paste0(hatch_date-initiation_date, " days"),
+                                   NA_character_)) %>%
+  ungroup() %>%
+  arrange(location, Date)
+
+
+# exploring the distribution of clutch size metrics
+clutch_status_stats_v1 <- clutch_status_init_hatch_labels_v1 %>%
+  filter(egg_num > 0 | Clutch_status == "E") %>%
+  group_by(location) %>%
+    summarize(first_egg_num = first(egg_num),
+              min_egg_num = min(egg_num, na.rm = TRUE),
+              max_egg_num = max(egg_num, na.rm = TRUE),
+              first_egg_len = first(egg_len),
+              min_egg_len = min(egg_len, na.rm = TRUE),
+              max_egg_len = max(egg_len, na.rm = TRUE),
+              initiation_date = first(initiation_date),
+              hatch_date = first(hatch_date),
+              egg_fate = factor(first(egg_fate)),
+              egg_fate_date = first(egg_fate_date),
+              any_NOr_ambig_loc = any(NOr_ambiguous)) %>%
+  ungroup() %>%
+  mutate(unhatched_days = as.integer(hatch_date-initiation_date)) %>%
+  left_join(omit_for_abandon_time) %>%
+# add number of clutches per plant
+  separate(location, c("DormPlant", "Leaf"), "_", remove = FALSE) %>%
+  mutate(Dorm = substr(DormPlant, 1,1),
+         Plant = substring(DormPlant, 2)) %>%
+  group_by(Dorm, Plant) %>%
+    mutate(n_clutches_on_plant = n()) %>%
+  ungroup() %>%
+  select(-Leaf, -DormPlant, -Dorm, -Plant)
+```
+
+Note that there is a strong relationship between egg number and clutch length, but the variance increases dramatically at larger numbers of eggs
+```{r}
+## How tight is the relationship between number of eggs and egg mass length?
+ggplot(data = clutch_status_init_hatch_v1, aes(x = egg_len, y = egg_num)) +
+  geom_hex() +
+  geom_smooth()
+```
+
+### [See note] Exporting a list of all clutches with initiation date and hatch date to keep track of revisions
+*Note:* Initially I ran this after creating the clutch_status_stats table, but to avoid needing to redo all the calculations/revisions to update clutch_status_stats I moved the data input and revision steps to before I create clutch_status_stats. This would need to be changed if working with the fresh data where "egg_measures_revions" doesn't already exist on the spreadsheet
+```{r}
+# exporting a list of all clutches with initiation date and hatch date to keep track of revisions
+short_unhatched_days_check <- clutch_status_stats_v1 %>% 
+  filter(unhatched_days <= 16)
+
+# write_csv(short_unhatched_days_check, "short_unhatched_days_check_tmp.csv")
+
+# *** when is this used for revisions, if ever?
+never_hatched_check <- clutch_status_stats_v1 %>% 
+  filter(is.na(hatch_date))
+
+# write_csv(never_hatched_check, "never_hatched_check_tmp.csv")
+
+
+# write_csv(clutch_status_stats_v1, "egg_measures_check_tmp.csv")
 ```
 
