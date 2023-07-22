@@ -1177,7 +1177,198 @@ never_hatched_check <- clutch_status_stats_v1 %>%
 
 # write_csv(never_hatched_check, "never_hatched_check_tmp.csv")
 
-
 # write_csv(clutch_status_stats_v1, "egg_measures_check_tmp.csv")
+```
+
+# 5 - Creating a table with relative guarding times
+This will be used for most of the downstream analyses.
+
+## 5.1 - Identify initiators, create visit/guard summaries (first pass)
+Creates `initiators`, `visit_durations_summary`, `clutch_durations_summary` and `num_clutches_initiated`
+```{r}
+initiators <- Female_location_visit_order_v1 %>%
+  arrange(Female_ID, Date) %>%
+  left_join(initiation_dates_v3, by = "location") %>%
+  left_join(hatch_dates_v3, by = "location") %>%
+  filter(!is.na(initiation_date), Date == initiation_date) %>%
+  arrange(location, Date, visit_order) %>%
+  group_by(location) %>%
+    # "first visitor initiator" means she was present at init and was the first female on the leaf
+    mutate(first_visitor_initiator = rank(visit_order, ties.method = "min") == 1) %>%
+  ungroup() %>%
+  group_by(location) %>%
+    mutate(num_at_init = n()) %>%
+  ungroup() %>%
+  select(-Date)
+
+visit_durations_summary <- Female_location_visit_order_v1 %>%
+  left_join(initiation_dates_v3, by = "location") %>%
+  left_join(hatch_dates_v3, by = "location") %>%
+  arrange(location, Date) %>%
+  group_by(Female_ID, location) %>%
+    summarize(visit_starts = first(Date),
+              visit_ends = last(Date),
+            visit_duration = last(Date) - first(Date),
+            guard_duration = last(Date) - max(first(Date, first(initiation_date))),
+            relative_desert_date = last(Date) - first(hatch_date)) %>%
+  ungroup() %>%
+  arrange(Female_ID, visit_starts) %>%
+  group_by(Female_ID) %>%
+    mutate(leaf_visit_order = rank(visit_starts, ties.method = "min")) %>%
+  ungroup()
+
+# add clutch_order (the order of the clutch a female has initiated)
+clutch_durations_summary <- visit_durations_summary %>%
+  right_join(initiators) %>%
+  group_by(location) %>% 
+    mutate(duration_rank = rank(desc(guard_duration), ties.method="min")) %>%
+  ungroup() %>%
+  group_by(Female_ID) %>%
+    arrange(visit_starts) %>%
+    # moms that were on the leaf first and were there at init are considered initiators
+    mutate(initiator = ifelse(first_visitor_initiator & num_at_init == 1, 
+                              TRUE,
+                              # break ties by assuming longest guarder was init and marked female was init
+                              ifelse(first_visitor_initiator & duration_rank == 1 & !grepl("U", Female_ID), 
+                                     TRUE,
+                                     FALSE)),
+           # if the visit ends while a clutch is present
+           clutch_visited_order = ifelse(visit_ends >= initiation_date,
+                                         # find the order of the clutch visit
+                                         rank(visit_starts, ties.method = "min"),
+                                         # otherwise, the female visited before init (rank = 0)
+                                         0) 
+    ) %>%
+  ungroup() %>%
+  group_by(Female_ID, initiator) %>%
+    # if the mom is the initiator
+    mutate(clutch_initiated_order = ifelse(initiator, 
+                                    # find the order of the clutch visit
+                                    rank(visit_starts, ties.method = "min"), 
+                                    # otherwise, this doesn't count as an initiation
+                                    NA)) %>% 
+  ungroup() %>%
+  arrange(Female_ID) %>%
+  mutate(Dorm = substr(location, 1,1)) %>%
+  mutate(females_removed = Dorm %in% c("D", "F", "G", "H"),
+         ants_removed = Dorm %in% c("C", "B", "F", "H"))
+
+num_clutches_initiated <- clutch_durations_summary %>%
+  group_by(Dorm, Female_ID) %>%
+    summarize(num_clutches_initiated = max(clutch_initiated_order),
+              females_removed = first(females_removed)) %>%
+  ungroup()
+```
+
+## 5.2 - Last date female was observed
+Last date female observed, so I have the option of filtering out females that probably died rather than leaving on their own fruition
+```{r}
+last_day_fID <- All_data_v6 %>%
+#  mutate(females_removed = Dorm %in% c("D", "F", "G", "H"),
+#         ants_removed = Dorm %in% c("C", "B", "F", "H")) %>%
+  group_by(Female_ID, Dorm) %>% #, females_removed, ants_removed) %>%
+  summarize(last_day_fID = max(Date)) %>%
+  ungroup()
+
+# ggplot(filter(last_day_fID, !females_removed)) + 
+#   geom_freqpoly(aes(x = last_day_fID, after_stat(density), color = ants_removed))
+
+# clutch_durations_summary_v2 %>% 
+#   filter(mom_at_init)
+```
+
+## 5.3 - Summary of secondary visitor behavior
+Need to differentiate visit days before eggs present from "guard" days after initiation.
+```{r}
+visit_durations_summary_v2 <- Female_location_visit_order_v1 %>%
+  left_join(initiation_dates_v3, by = "location") %>%
+  left_join(hatch_dates_v3, by = "location") %>%
+  arrange(location, Date) %>%
+  group_by(Female_ID, location) %>%
+    summarize(visit_starts = first(Date),
+              visit_ends = last(Date),
+            visit_duration = visit_ends - visit_starts,
+            # duration of visit after initiation (NA if did not visit while eggs present)
+            guard_duration = ifelse(visit_ends - max(visit_starts, first(initiation_date)) >= 0,
+                                    visit_ends - max(visit_starts, first(initiation_date)),
+                                    NA),
+            relative_desert_date = visit_ends - first(hatch_date),
+            initiation_date = first(initiation_date),
+            hatch_date = first(hatch_date)) %>%
+  ungroup() %>%
+  arrange(Female_ID, visit_starts) %>%
+  group_by(Female_ID) %>%
+    mutate(leaf_visit_order = rank(visit_starts, ties.method = "min")) %>%
+  ungroup() %>%
+  arrange(location, visit_starts)
+```
+
+## 5.4 Alternatives to determining who is the initiator
+Create `clutch_durations_summary_v2` and `clutch_status_guarding_summary_v2` after identify the "longest initiator" and `shortest initiator` for each clutch, corresponding to the mother at initiation that was there the longest prior to eggs being observed and (1) remained guarding the clutch the longest after initiation or (2) deserted the clutch the earliest after initiation, respectively.
+```{r}
+num_at_init <- initiators %>%
+  distinct(location, num_at_init) 
+
+clutch_durations_summary_v2 <- visit_durations_summary_v2 %>%
+  left_join(select(initiators, -initiation_date, -hatch_date, -num_at_init)) %>%
+  left_join(num_at_init, by = "location") %>%
+  # note: includes small num of moms on a leaf before init, left before init, then returned
+  mutate(mom_at_init = ifelse(visit_starts <= initiation_date & visit_ends >= initiation_date,
+                              TRUE,
+                              FALSE)) %>%
+  group_by(location) %>% 
+    mutate(init_dur_rank = rank(desc(ifelse(mom_at_init, guard_duration, NA)),
+                                ties.method="min", na.last = "keep"),
+           init_dur_shortest = rank(ifelse(mom_at_init, guard_duration, NA),
+                                ties.method="min", na.last = "keep") == 1,
+           init_first_dur_rank = rank(desc(ifelse(first_visitor_initiator, guard_duration, NA)),
+                                ties.method="min", na.last = "keep"),
+           init_first_dur_shortest = rank(ifelse(first_visitor_initiator, guard_duration, NA),
+                                ties.method="min", na.last = "keep") == 1) %>%
+  ungroup() %>%
+  # mutate(init_long = init_dur_rank == 1,
+  #        init_short = init_dur_shortest,
+  #        init_first_long = init_first_dur_rank == 1,
+  #        init_first_short = init_first_dur_shortest) %>%
+  group_by(Female_ID) %>%
+    # if the visit ends while a clutch is present
+    mutate(clutch_visited_order = ifelse(visit_ends >= initiation_date,
+                                         # find the order of the clutch visit
+                                         rank(visit_starts, ties.method = "min"),
+                                         # otherwise, the female visited before init (rank = 0)
+                                         0),
+           clutch_initiated_order = rank(ifelse(mom_at_init, visit_starts, NA),
+                                         ties.method = "min", na.last = "keep"),
+           clutch_init_first_order = rank(ifelse(first_visitor_initiator, visit_starts, NA),
+                                          ties.method = "min", na.last = "keep")) %>%
+           # clutch_init_long_order = rank(ifelse(init_long, visit_starts, NA),
+           #                         ties.method = "min", na.last = "keep"),
+           # clutch_init_first_long_order = rank(ifelse(init_first_long, visit_starts, NA),
+           #                         ties.method = "min", na.last = "keep"),
+           # clutch_init_first_short_order = rank(ifelse(init_first_short, visit_starts, NA),
+           #                         ties.method = "min", na.last = "keep")) %>% 
+  ungroup() %>%
+  arrange(location, visit_starts) %>%
+  mutate(Dorm = substr(location,1,1),
+         females_removed = Dorm %in% c("D", "F", "G", "H"),
+         ants_removed = Dorm %in% c("C", "B", "F", "H"))
+
+clutch_status_guarding_summary_v2 <- clutch_durations_summary_v2 %>%
+  left_join(select(clutch_status_stats_v1, -initiation_date, -hatch_date), by = "location") %>%
+  left_join(select(num_clutches_initiated, -females_removed), by=c("Dorm", "Female_ID")) %>%
+  left_join(select(check_hatch_date_revisions, location, hatch_date_check = revised_hatch_date_text), by="location") %>%
+  left_join(select(short_unhatched_check_revisions, location, short_unhatched_check = Egg_revisions), by="location") %>%
+  # "never_hatched" should be used to override the automatically generated hatch date based on presence of nymphs
+  # but this work has already been done by check_hatch_date_revisions and short_unhatched_check_revisions revisions
+  # so this column isn't really useful for anything
+  mutate(never_hatched = grepl("never hatched", hatch_date_check) | grepl("never hatched", short_unhatched_check)) %>%
+  select(-hatch_date_check, -short_unhatched_check)
+```
+
+# 6 - Write data to `.rds` for further analysis in clean environment
+```{r}
+write_rds(All_data_v6, here("saved_rds/All_data_v6.rds"))
+write_rds(clutch_status_guarding_summary_v2, here("saved_rds/clutch_status_guarding_summary_v2.rds"))
+write_rds(last_day_fID, here("saved_rds/last_day_fID.rds"))
 ```
 
