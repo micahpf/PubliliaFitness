@@ -2170,3 +2170,12 @@ hatch_text <- base_text %>%
   coord_cartesian(clip = "off"))
 ```
 
+# 2023.07.22 - Using geom_ridgeline instead of freq_poly with alpha
+Sarah asked to remove the stats text
+```{r, fig.width=3, fig.height=2}
+Fig1_v1D +
+  xlab("Day first visited (days from initiation)") +
+  ylab("Guard duration of initiating female") +
+    theme(legend.position = "none")
+```
+
