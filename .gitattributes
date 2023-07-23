@@ -1,0 +1,2 @@
+# Treat .Rmd files as R lang for the purposes of repo stats
+*.Rmd linguist-language=R
