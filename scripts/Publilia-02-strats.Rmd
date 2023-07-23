@@ -2131,12 +2131,12 @@ hist_strips <- strip_nested(
 )
 
 base_text <- expand.grid(ants = c("Ants removed", "Control"),
-            `visited in 4 days` = c("Not visited within first 4 days", 
-                                    "Visited within first 4 days")) %>%
+            `visited in 4 days` = c("Not visited\nwithin first 4 days", 
+                                    "Visited\nwithin first 4 days")) %>%
   tibble()
 
 hatch_text <- base_text %>%
-  mutate(label = ifelse(ants=="Ants removed" & `visited in 4 days`=="Not visited within first 4 days", 
+  mutate(label = ifelse(ants=="Ants removed" & `visited in 4 days`=="Not visited\nwithin first 4 days", 
          "Hatch date", 
          ""))
 
@@ -2146,8 +2146,8 @@ hatch_text <- base_text %>%
   filter(!is.na(`visited in 4 days`)) %>%
   mutate(`visited in 4 days` = 
            ifelse(`visited in 4 days` == "Visited", 
-                  "Visited within first 4 days", 
-                  "Not visited within first 4 days")) %>%
+                  "Visited\nwithin first 4 days", 
+                  "Not visited\nwithin first 4 days")) %>%
   ggplot(aes(x=guard_duration, fill=ants)) +
   geom_histogram(binwidth = 4) +
   theme_publilia() +
@@ -2162,8 +2162,10 @@ hatch_text <- base_text %>%
   ggh4x::facet_grid2(vars(`visited in 4 days`, ants), 
                      strip = hist_strips) +
   theme(strip.background = element_rect(color = NA),
+        strip.text = element_text(size = 12),
         legend.justification = c(1,1),
-        legend.position = c(1,0.2)) +
+        legend.position = c(1,0.2),
+        legend.text = element_text(size = 12)) +
   geom_text(data = hatch_text,
             aes(x = 20, y = Inf, label = label),
             hjust = -0.1, vjust = 0, color = "gray", fontface = "bold") +
