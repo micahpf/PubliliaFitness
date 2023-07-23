@@ -2175,9 +2175,147 @@ hatch_text <- base_text %>%
 # 2023.07.22 - Using geom_ridgeline instead of freq_poly with alpha
 Sarah asked to remove the stats text
 ```{r, fig.width=3, fig.height=2}
+# Visualization: box plots with p-values
 Fig1_v1D +
-  xlab("Day first visited (days from initiation)") +
+    geom_text(data=strats_cuts_v1.multcompLetters, 
+              aes(x=vis_cat, y=-4, label=label, 
+                  color=vis_cat%in%c("0","1 to 4")), 
+              fontface="bold", size=6) +
+  xlab("Day first visited (Days since initiation)") +
   ylab("Guard duration of initiating female") +
-    theme(legend.position = "none")
+  theme(legend.position = "none")
+```
+
+# 2023.07.22 - Upset plot to clarify sample sizes
+
+## The data used for the figures
+```{r}
+## Unfiltered data
+strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
+
+## Data for histogram
+visited_1st_4d_data <- strats_data %>%
+  group_by(location) %>%
+    mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
+  ungroup() %>%
+  mutate(`visited in 4 days` = ifelse(visited_1st_4d | num_at_init>1,
+                                      "Visited", "Not visited"),
+         ants = ifelse(ants_removed, "Ants removed", "Control"),
+         est_hatch = as_date(ifelse(is.na(hatch_date),
+                                 initiation_date + 20,
+                                 hatch_date)),
+         est_rel2h = visit_ends-est_hatch)
+
+visited_1st_4d_data %>%
+  filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
+         clutch_initiated_order == 1, visit_ends < last_day_fID) %>% 
+  filter(!is.na(`visited in 4 days`)) %>%
+  mutate(`visited in 4 days` = 
+           ifelse(`visited in 4 days` == "Visited", 
+                  "Visited\nwithin first 4 days", 
+                  "Not visited\nwithin first 4 days"))
+
+## Data for visit vs init
+vis_cat_v1.data <- visited_1st_4d_data %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
+         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
+                                              "5+","never visited"))) %>%
+  filter(!females_removed, mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID,
+         # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
+         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
+         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+         !is.na(vis_cat))
+```
+
+## Upset plot
+```{r, fig.width=6, fig.height=2}
+# ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
+         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
+         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+
+sample_size_upset_data <- strats_data %>%
+  group_by(location) %>%
+    mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
+  ungroup() %>%
+  mutate(`visited in 4 days` = ifelse(visited_1st_4d | num_at_init>1,
+                                      "Visited", "Not visited"),
+         ants = ifelse(ants_removed, "Ants removed", "Control"),
+         est_hatch = as_date(ifelse(is.na(hatch_date),
+                                 initiation_date + 20,
+                                 hatch_date)),
+         est_rel2h = visit_ends-est_hatch) %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
+         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
+                                              "5+","never visited"))) %>%
+  filter(!is.na(vis_cat)) %>% #**
+  # build logicals representing inclusion in different plots
+  mutate(`Text: 4 different strats` =
+           !females_removed & 
+           clutch_visited_order == 1,
+         `Figure 4 (dur vs 1st visit)` = 
+           !females_removed & 
+           mom_at_init &
+           clutch_initiated_order == 1 & 
+           !grepl("U", Female_ID) & 
+           visit_ends < last_day_fID,
+         `Figure 3 (dur histograms)` = 
+           !females_removed & 
+           mom_at_init &
+           clutch_initiated_order == 1 &
+           !grepl("U", Female_ID) & 
+           visit_ends < last_day_fID & 
+           !is.na(`visited in 4 days`)) %>%
+  mutate(`ants excluded` = ants_removed,
+         `female removed` = females_removed,
+         `female present at intiation` = mom_at_init,
+         `her first clutch` = clutch_visited_order == 1,
+         `first clutch she initiated` = clutch_initiated_order == 1,
+         `female marked` = !grepl("U", Female_ID),
+         `female disappeared` = !(visit_ends < last_day_fID),
+         `unknown whether visited` = is.na(`visited in 4 days`)) %>%
+  select(Female_ID, location,
+         `ants excluded`, `female removed`,
+         `female present at intiation`, 
+         `first clutch she initiated`,
+         `first clutch she initiated or visited`,
+         `female marked`, `female disappeared`, `unknown whether visited`, 
+         `Figure 3 (dur histograms)`, 
+         `Figure 4 (dur vs 1st visit)`,
+         `Text: 4 different strats`) %>%
+  pivot_longer(cols = `ants excluded`:`unknown whether visited`,
+               names_to = "filter_name",
+               values_to = "filter_true") %>%
+  filter(filter_true) %>%
+  group_by(Female_ID, location, 
+           `Text: 4 different strats`,
+           `Figure 3 (dur histograms)`, `Figure 4 (dur vs 1st visit)`) %>%
+  summarize(filters = list(filter_name))
+
+sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Text: 4 different strats`)) +
+    geom_bar() +
+    scale_x_upset()
+
+sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Figure 3 (dur histograms)`)) +
+    geom_bar() +
+    scale_x_upset()
+
+sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Figure 4 (dur vs 1st visit)`)) +
+    geom_bar() +
+    scale_x_upset()
+
+
 ```
 
