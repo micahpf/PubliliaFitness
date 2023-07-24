@@ -1,0 +1,239 @@
+---
+title: 'TreehopperFitness: Run this file for all stats, tables, and figures'
+author: "Micah Fletcher"
+date: '`r Sys.Date()`'
+output: 
+  rmdformats::robobook:
+  fig_width: 9
+toc_depth: 3
+---
+
+# 0 - Data import
+
+clutch_status_guarding_summary_v2
+```{r}
+All_data_v6 <- read_rds(here("saved_rds/All_data_v6.rds"))
+clutch_status_guarding_summary_v2 <- read_rds(here("saved_rds/clutch_status_guarding_summary_v2.rds"))
+last_day_fID <- read_rds(here("saved_rds/last_day_fID.rds"))
+
+strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
+```
+
+# 1 - Mothers dynamically adjust care depending on the presence of ants and conspecific females
+
+*First, we build logical columns for each of the desired filters for different text sections and figures. This way we can keep the total universe of data in one place and ensure that we are certain which data are being left out and why.*
+```{r}
+strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
+
+strats_data_with_filters <- strats_data %>%
+  # Add whether female was visited within first 4 days of initiating
+  group_by(location) %>%
+    mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
+  ungroup() %>%
+  # Add some additional metrics for human readability
+  mutate(`visited in 4 days` = ifelse(visited_1st_4d | num_at_init>1,
+                                      "Visited", "Not visited"),
+         ants = ifelse(ants_removed, "Ants removed", "Control"),
+         est_hatch = as_date(ifelse(is.na(hatch_date),
+                                 initiation_date + 20,
+                                 hatch_date)),
+         est_rel2h = visit_ends-est_hatch) %>%
+  # Add day of first visit bins
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
+         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
+                                              "5+","never visited"))) %>%
+  # Remove one female who has dubious data (See note ** below)
+  filter(!is.na(vis_cat)) %>%
+  # Build logicals representing inclusion in different plots
+  mutate(`Text: 4 different strats` =
+           !females_removed & 
+           clutch_visited_order == 1,
+         `Figure 4 (dur vs 1st visit)` = 
+           !females_removed & 
+           mom_at_init &
+           clutch_initiated_order == 1 & 
+           !grepl("U", Female_ID) & 
+           visit_ends < last_day_fID,
+         `Figure 3 (dur histograms)` = 
+           !females_removed & 
+           mom_at_init &
+           clutch_initiated_order == 1 &
+           !grepl("U", Female_ID) & 
+           visit_ends < last_day_fID & 
+           !is.na(`visited in 4 days`))
+
+# ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date. I suspect I missed her in the field or she may have left and come back. In any case she was never visited and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+```
+
+*To double-check that we understand how we've filtered the data for each sub-analysis, we can represent each filtering regime as an upset plot*
+```{r, fig.width=6, fig.height=2}
+sample_size_upset_data <-strats_data_with_filters %>%
+  mutate(`ants excluded` = ants_removed,
+         `female removed` = females_removed,
+         `female present at intiation` = mom_at_init,
+         `her first clutch` = clutch_visited_order == 1,
+         `first clutch she initiated` = clutch_initiated_order == 1,
+         `female marked` = !grepl("U", Female_ID),
+         `female disappeared` = !(visit_ends < last_day_fID),
+         `unknown whether visited` = is.na(`visited in 4 days`)) %>%
+  select(Female_ID, location,
+         `ants excluded`, `female removed`,
+         `female present at intiation`, 
+         `first clutch she initiated`,
+         `her first clutch`,
+         `female marked`, `female disappeared`, `unknown whether visited`, 
+         `Figure 3 (dur histograms)`, 
+         `Figure 4 (dur vs 1st visit)`,
+         `Text: 4 different strats`) %>%
+  pivot_longer(cols = `ants excluded`:`unknown whether visited`,
+               names_to = "filter_name",
+               values_to = "filter_true") %>%
+  filter(filter_true) %>%
+  group_by(Female_ID, location, 
+           `Text: 4 different strats`,
+           `Figure 3 (dur histograms)`, `Figure 4 (dur vs 1st visit)`) %>%
+  summarize(filters = list(filter_name))
+
+sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Text: 4 different strats`)) +
+    geom_bar() +
+    scale_x_upset() +
+  theme_publilia()
+
+sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Figure 3 (dur histograms)`)) +
+    geom_bar() +
+    scale_x_upset() +
+  theme_publilia()
+
+sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Figure 4 (dur vs 1st visit)`)) +
+    geom_bar() +
+    scale_x_upset() +
+  theme_publilia()
+```
+
+## Text 
+Most females laid their first eggs by initiating their own clutch while some females started by visiting an existing clutch (n=115 and 36 respectively). 
+```{r}
+strats_data_with_filters %>%
+  filter(`Text: 4 different strats`) %>%
+  count(clutch_initiated_order == 1)
+
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         clutch_visited_order == 1) %>%
+  count(clutch_initiated_order == 1)
+
+print(paste("% (not removed) females that started the season by visiting an existing clutch:", 36/151*100))
+print(paste("% (not removed) females that started by initiating their own clutch:", 115/151*100))
+
+visited_1st_4d_data_tb %>%
+  filter(females_removed,
+         clutch_visited_order == 1) %>%
+  count(clutch_initiated_order == 1)
+62/100
+
+visited_1st_4d_data_tb %>%
+  filter(clutch_visited_order == 1) %>%
+  count(clutch_initiated_order == 1)
+62/215
+```
+
+Visits by secondary females were typically short (median = X days) and only 2 visitors remained through hatching (Figure 2B). 
+```{r}
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         !mom_at_init,
+         visit_ends < last_day_fID) %>%
+  summarize(n = n(),
+            n_NA = sum(is.na(guard_duration)),
+            mean_gd = mean(as.numeric(guard_duration, "days"), na.rm=T),
+            med_gd = median(as.numeric(guard_duration, "days"), na.rm=T))
+```
+
+## Figure 3
+*Figure 3. The distribution of desertion times relative to hatching* (desertion date – hatch date) for females on the first clutch they initiated in the ant exclusion (black) and control (red) enclosures, for clutches that were not visited by a secondary female within 4 days of initiation (A) and for clutch that were visited by a secondary female within 4 days of initiation (B). Desertion time = 0 (dashed) is the day nymphs were first observed, and desertion time = -20 (dotted) is the mean initiation date relative to hatching.
+```{r, fig.width=3, fig.height=3}
+#visit_colors <- rev(unique(ggplot_build(Fig1_v1D)$data[[1]]$fill))
+visit_colors <- c("#66C2A5", "#FC8D62")
+
+hist_strips <- strip_nested(
+     # Horizontal strips
+     background_y = list(
+       element_rect(fill = visit_colors[1]), 
+       element_rect(fill = visit_colors[2]), 
+       element_blank(), element_blank(), 
+       element_blank(), element_blank()),
+     text_y = list(
+       element_text(color = c("black")), 
+       element_text(color = c("black")), 
+       element_blank(), element_blank(), 
+       element_blank(), element_blank()),
+     by_layer_y = FALSE
+)
+
+base_text <- expand.grid(ants = c("Ants removed", "Control"),
+            `visited in 4 days` = c("Not visited\nwithin first 4 days", 
+                                    "Visited\nwithin first 4 days")) %>%
+  tibble()
+
+hatch_text <- base_text %>%
+  mutate(label = ifelse(ants=="Ants removed" & `visited in 4 days`=="Not visited\nwithin first 4 days", 
+         "Hatch date", 
+         ""))
+
+(guarding_durations_plot_2023 <- strats_data_with_filters %>%
+  filter(`Figure 3 (dur histograms)`) %>%
+  mutate(`visited in 4 days` = 
+           ifelse(`visited in 4 days` == "Visited", 
+                  "Visited\nwithin first 4 days", 
+                  "Not visited\nwithin first 4 days")) %>%
+  ggplot(aes(x=guard_duration, fill=ants)) +
+  geom_histogram(binwidth = 4) +
+  theme_publilia() +
+  xlab("Guarding duration") +
+  ylab("Number of females") +
+  scale_y_continuous(breaks = c(0,4,8),
+                     labels = label_number(accuracy = 1)) +
+  scale_color_manual(values = c("black", "brown1")) +
+  scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = 20, linetype="dashed", 
+                color = "gray", size=1) +
+  ggh4x::facet_grid2(vars(`visited in 4 days`, ants), 
+                     strip = hist_strips) +
+  theme(strip.background = element_rect(color = NA),
+        strip.text = element_text(size = 12),
+        legend.justification = c(1,1),
+        legend.position = c(1,0.2),
+        legend.text = element_text(size = 12)) +
+  geom_text(data = hatch_text,
+            aes(x = 20, y = Inf, label = label),
+            hjust = -0.1, vjust = 0, color = "gray", fontface = "bold") +
+  coord_cartesian(clip = "off"))
+```
+
+# 2 - Early visits by other females lead to early desertion of clutches
+
+## Figure 4
+*Figure 4. The guarding duration (days) of initiating females who were first visited by a secondary female on different numbers of days after initiation.* Day 0 represents females that were visited on the first day eggs were observed (i.e. more than one female was on the clutch when eggs were first observed). Violin plots show the density of observations. Letters signify factor levels that are not significantly different (p-value < 0.05 from a Dunn test after multiple testing correction using the Holm-Bonferroni method). The colors indicate whether the clutch was visited (orange) or not (green) within the first 4 days after initiation.
+```{r, fig.width=3, fig.height=2}
+(Fig1_v1D <- strats_data_with_filters %>%
+  filter(`Figure 4 (dur vs 1st visit)`) %>% 
+  ggplot(aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_violin(aes(fill=vis_cat%in%c("0","1 to 4")), color = NA, trim=T, size=2, alpha=0.50) +
+  geom_jitter(aes(color=vis_cat%in%c("0","1 to 4")), width=0.1, size=3) +
+  scale_color_brewer(palette="Set2") + scale_fill_brewer(palette="Set2") +
+  geom_text(data=strats_cuts_v1.multcompLetters, 
+            aes(x=vis_cat, y=-4, label=label,
+                color=vis_cat %in% c("0","1 to 4")), 
+              fontface="bold", size=6) +
+  xlab("Day of first visit (Days since initiation)") +
+  ylab("Guard duration of initiating female") +
+  theme_publilia() +
+  theme(legend.position = "none"))
+```
+
+

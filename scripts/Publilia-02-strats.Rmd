@@ -2237,9 +2237,7 @@ vis_cat_v1.data <- visited_1st_4d_data %>%
 
 ## Upset plot
 ```{r, fig.width=6, fig.height=2}
-# ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
-         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
-         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+library(ggupset)
 
 sample_size_upset_data <- strats_data %>%
   group_by(location) %>%
