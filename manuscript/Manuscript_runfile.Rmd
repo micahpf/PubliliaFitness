@@ -48,31 +48,36 @@ strats_data_with_filters <- strats_data %>%
          vis_cat = factor(vis_cat, levels = c("0","1 to 4",
                                               "5+","never visited"))) %>%
   # Remove one female who has dubious data (See note ** below)
-  filter(!is.na(vis_cat)) %>%
+  #filter(!is.na(vis_cat)) %>%
   # Build logicals representing inclusion in different plots
   mutate(`Text: 4 different strats` =
            !females_removed & 
-           clutch_visited_order == 1,
+           clutch_visited_order == 1 &
+           !is.na(num_at_init),
          `Figure 4 (dur vs 1st visit)` = 
            !females_removed & 
            mom_at_init &
            clutch_initiated_order == 1 & 
            !grepl("U", Female_ID) & 
-           visit_ends < last_day_fID,
+           visit_ends < last_day_fID &
+           !is.na(num_at_init),
          `Figure 3 (dur histograms)` = 
            !females_removed & 
            mom_at_init &
            clutch_initiated_order == 1 &
            !grepl("U", Female_ID) & 
            visit_ends < last_day_fID & 
-           !is.na(`visited in 4 days`))
+           !is.na(`visited in 4 days`) &
+           !is.na(num_at_init))
 
 # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date. I suspect I missed her in the field or she may have left and come back. In any case she was never visited and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+
+# ** 2023.07.28: c("D_Rwyw", "E_Rgrw", "E_Gkgg", "F_Yrgw") on c("D82_12", "E148_6", "E40_9",  "F4_6") were similar. See github issue #2.
 ```
 
 *To double-check that we understand how we've filtered the data for each sub-analysis, we can represent each filtering regime as an upset plot*
-```{r, fig.width=6, fig.height=2}
-sample_size_upset_data <-strats_data_with_filters %>%
+```{r, fig.width=10, fig.height=4}
+sample_size_upset_data <- strats_data_with_filters %>%
   mutate(`ants excluded` = ants_removed,
          `female removed` = females_removed,
          `female present at intiation` = mom_at_init,
@@ -80,17 +85,18 @@ sample_size_upset_data <-strats_data_with_filters %>%
          `first clutch she initiated` = clutch_initiated_order == 1,
          `female marked` = !grepl("U", Female_ID),
          `female disappeared` = !(visit_ends < last_day_fID),
-         `unknown whether visited` = is.na(`visited in 4 days`)) %>%
+         `unknown whether visited` = is.na(`visited in 4 days`),
+         `initiator known` = !is.na(num_at_init)) %>%
   select(Female_ID, location,
          `ants excluded`, `female removed`,
          `female present at intiation`, 
          `first clutch she initiated`,
          `her first clutch`,
-         `female marked`, `female disappeared`, `unknown whether visited`, 
+         `female marked`, `female disappeared`, `unknown whether visited`, `initiator known`, 
          `Figure 3 (dur histograms)`, 
          `Figure 4 (dur vs 1st visit)`,
          `Text: 4 different strats`) %>%
-  pivot_longer(cols = `ants excluded`:`unknown whether visited`,
+  pivot_longer(cols = `ants excluded`:`initiator known`,
                names_to = "filter_name",
                values_to = "filter_true") %>%
   filter(filter_true) %>%
@@ -99,48 +105,61 @@ sample_size_upset_data <-strats_data_with_filters %>%
            `Figure 3 (dur histograms)`, `Figure 4 (dur vs 1st visit)`) %>%
   summarize(filters = list(filter_name))
 
-sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Text: 4 different strats`)) +
+sample_size_upset_data %>% 
+  ggplot(aes(x=filters, fill = `Text: 4 different strats`)) +
     geom_bar() +
     scale_x_upset() +
+    geom_text(stat='count', aes(label=after_stat(count)), vjust=-1) +
   theme_publilia()
 
-sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Figure 3 (dur histograms)`)) +
+sample_size_upset_data %>% 
+  ggplot(aes(x=filters, fill = `Figure 3 (dur histograms)`)) +
     geom_bar() +
     scale_x_upset() +
+  geom_text(stat='count', aes(label=after_stat(count)), vjust=-1) +
   theme_publilia()
 
-sample_size_upset_data %>% ggplot(aes(x=filters, fill = `Figure 4 (dur vs 1st visit)`)) +
+sample_size_upset_data %>% 
+  ggplot(aes(x=filters, fill = `Figure 4 (dur vs 1st visit)`)) +
     geom_bar() +
     scale_x_upset() +
+  geom_text(stat='count', aes(label=after_stat(count)), vjust=-1) +
   theme_publilia()
 ```
 
 ## Text 
-Most females laid their first eggs by initiating their own clutch while some females started by visiting an existing clutch (n=115 and 36 respectively). 
 ```{r}
-strats_data_with_filters %>%
-  filter(`Text: 4 different strats`) %>%
-  count(clutch_initiated_order == 1)
+n_start_by_init <- strats_data_with_filters %>%
+  filter(`Text: 4 different strats`) %>% 
+  pull(clutch_initiated_order) %>% 
+  sum(.data == 1, na.rm = TRUE)
 
-visited_1st_4d_data_tb %>%
-  filter(!females_removed,
-         clutch_visited_order == 1) %>%
-  count(clutch_initiated_order == 1)
+n_start_by_visit <- strats_data_with_filters %>%
+  filter(`Text: 4 different strats`) %>% 
+  pull(clutch_initiated_order) %>% 
+  is.na() %>% sum()
 
-print(paste("% (not removed) females that started the season by visiting an existing clutch:", 36/151*100))
-print(paste("% (not removed) females that started by initiating their own clutch:", 115/151*100))
+# visited_1st_4d_data_tb %>%
+#   filter(!females_removed,
+#          clutch_visited_order == 1) %>%
+#   count(clutch_initiated_order == 1)
 
-visited_1st_4d_data_tb %>%
-  filter(females_removed,
-         clutch_visited_order == 1) %>%
-  count(clutch_initiated_order == 1)
-62/100
-
-visited_1st_4d_data_tb %>%
-  filter(clutch_visited_order == 1) %>%
-  count(clutch_initiated_order == 1)
-62/215
+# print(paste("% (not removed) females that started the season by visiting an existing clutch:", 36/151*100))
+# print(paste("% (not removed) females that started by initiating their own clutch:", 115/151*100))
+# 
+# visited_1st_4d_data_tb %>%
+#   filter(females_removed,
+#          clutch_visited_order == 1) %>%
+#   count(clutch_initiated_order == 1)
+# 62/100
+# 
+# visited_1st_4d_data_tb %>%
+#   filter(clutch_visited_order == 1) %>%
+#   count(clutch_initiated_order == 1)
+# 62/215
 ```
+Most females laid their first eggs by initiating their own clutch while some females started by visiting an existing clutch (n=`r n_start_by_init` and `r n_start_by_visit` respectively). 
+
 
 Visits by secondary females were typically short (median = X days) and only 2 visitors remained through hatching (Figure 2B). 
 ```{r}
