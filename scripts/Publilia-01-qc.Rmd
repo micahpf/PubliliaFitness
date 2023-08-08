@@ -1365,10 +1365,861 @@ clutch_status_guarding_summary_v2 <- clutch_durations_summary_v2 %>%
   select(-hatch_date_check, -short_unhatched_check)
 ```
 
-# 6 - Write data to `.rds` for further analysis in clean environment
+# 6 - Write data for `Publilia-02-strats.Rmd` to `.rds` for further analysis in clean environment
+
+## `Publilia-02-strats.Rmd`
 ```{r}
 write_rds(All_data_v6, here("saved_rds/All_data_v6.rds"))
 write_rds(clutch_status_guarding_summary_v2, here("saved_rds/clutch_status_guarding_summary_v2.rds"))
 write_rds(last_day_fID, here("saved_rds/last_day_fID.rds"))
 ```
+
+
+
+***
+
+*Prep data for `Publilia-03-survivorship.Rmd`:*
+
+# 7 - Assigning nymph origins
+
+Nymphs migrate away from their natal leaf. On plants with multiple clutches, it was sometimes possible to determine the origin of nymphs later in the season because sometimes groups of nymph don't travel very far from their natal leaf and mix with other groups. I manually curated examples of this, so that clutch-level stats on hatching success and nymph survivorship could be determined on the plants with multiple clutches. Some clutches (as a rule only on multi-clutch plants) did not have a clear record of nymphs that emigrated from the natal leaf and thus could not be included in future clutch-level analyses of survivorship.
+
+## 7.1 - Adding second gen adult counts per leaf to clutch status stats
+```{r}
+# counting adults
+eA_status_v1 <- All_data_v6 %>%
+  group_by(row_number()) %>% # sum of newly exclosed adults
+  filter(any(!is.na(c(New_eA, Old_eA)))) %>%
+  mutate(n_newA = ifelse(is.na(New_eA),
+                         NA,
+                         sum(as.numeric(regmatches(New_eA, gregexpr("[0-9]+", New_eA))[[1]]))),
+         n_oldA = ifelse(is.na(Old_eA),
+                         NA,
+                         sum(as.numeric(regmatches(Old_eA, gregexpr("[0-9]+", Old_eA))[[1]]))),
+         n_A = sum(n_newA, n_oldA, na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(Date, location, n_newA, n_oldA, n_A)
+
+All_data_v6_clutch_status_stats_v2 <- All_data_v6 %>%
+  # add egg measures, clutch status stats (including initiation dates, hatch dates, egg fate, etc)
+  left_join(clutch_status_v2, by = c("location", "Date")) %>%
+  left_join(clutch_status_stats_v1, by = c("location")) %>%
+  left_join(eA_status_v1, by = c("Date", "location")) %>%
+  left_join(select(clutch_status_guarding_summary_v2, location, never_hatched)) %>%
+  mutate(N1 = as.numeric(N1),
+         N2 = as.numeric(N2),
+         N5 = as.numeric(N5))
+```
+
+## 7.2 - Manually check nymph origins for revision
+First create a table of all entried from clutches that were not flagged in the field as having ambiguous origin (e.g. "leaf 6 or 9") in cases were more than one clutch was on the plant. These were revised manually to specify a leaf of origin for the nymphs, where possible.
+```{r}
+NOr_status_resolveable_all_unambig_clutches <- All_data_v6_clutch_status_stats_v2 %>% 
+  select(Date, Dorm, Plant, Leaf, location, 
+         egg_num, N1, N2, N5, n_A, nymph_origin, initiation_date, hatch_date,
+         any_NOr_ambig_loc, Omit_for_abandon_time, never_hatched,
+         n_clutches_on_plant) %>%
+  # keep only entries with some nymphs or adults on a leaf
+  # OR entries for leaves where clutches have been initiated
+  group_by(row_number()) %>%
+  filter(!is.na(Leaf) & any(N1 > 0, N2 > 0, N5 > 0, n_A > 0) | 
+           Date >= initiation_date) %>% # nrow = 17944
+  # flag entries where the nymph origin is text (typically ambiguous, e.g. "8 or 9")
+  mutate(NOr_ambig_entry = !is.na(nymph_origin) & is.na(as.numeric(nymph_origin))) %>% 
+  ungroup() %>%
+  # get rid of duplicate rows from multiple females in the same location
+  distinct(Date, location, .keep_all = TRUE) %>% # nrow = 15674
+  group_by(Dorm, Plant) %>%
+    # filter out any plants with a clutch that was omitted for abandon time
+    filter(!any(!is.na(Omit_for_abandon_time))) %>%
+    # flag plants with any ambiguous entries (e.g. "8 or 9") skip for checking
+    mutate(NOr_ambig_plant = any(NOr_ambig_entry)) %>%
+  ungroup()
+
+NOr_status_resolveable_mult_clutches <- NOr_status_resolveable_all_unambig_clutches %>% # nrow = 15674
+  group_by(Dorm, Plant) %>%
+    # plants with mutliple clutches only
+    filter(any(n_clutches_on_plant > 1)) %>%
+  ungroup() %>%
+  group_by(row_number()) %>%
+    # flag for manual checking entries with any nymphs/adults, missing nymph origin, 
+    # but not flagged for ambiguous origin in the field.
+    # these are the most likely to be easily resolved with minimal work
+    mutate(revise_NOr = ifelse(any(N1 > 0, N2 > 0, N5 > 0, n_A > 0) &
+             !NOr_ambig_plant,
+           "MANUAL CHECK",
+           NA)) %>% 
+  ungroup()
+
+NOr_manual_check_table <- NOr_status_resolveable_mult_clutches %>%
+  group_by(Dorm, Plant) %>%
+    filter(any(revise_NOr == "MANUAL CHECK")) %>% # nrow = 2830
+  ungroup() %>%
+    group_by(row_number()) %>%
+    filter(any(N1 > 0, N2 > 0, N5 > 0, n_A > 0)) %>%
+  ungroup() %>%
+  select(Date, Dorm, Plant, Leaf, location, egg_num, N1, N2, N5, n_A, nymph_origin,
+         initiation_date, hatch_date,
+         revise_NOr) %>%
+  arrange(Dorm, as.numeric(Plant), as.numeric(Leaf), Date)
+# 83 clutches on 34 plants to check
+
+# write_csv(NOr_manual_check_table %>% filter(revise_NOr == "MANUAL CHECK"), "NOr_manual_check_tmp.csv")
+
+NOr_manual_revisions <- read_xlsx(in_filename, sheet = "NOr_manual_check", col_types = c("date", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "logical", "text")) %>%
+  mutate(Date = as_date(Date),
+         NOr_rev_loc_manual = paste0(Dorm, Plant, "_", NOr_revised)) %>%
+  filter(!cant_resolve) %>%
+  select(Date, location, NOr_rev_loc_manual, NOr_revised_manual = NOr_revised)
+
+NOr_manual_revisions %>%
+  distinct(NOr_rev_loc_manual) # 43/83 initiated clutches (43/59 hatched) with successfully revised NOr
+```
+
+## 7.3 - Implement revisions by creating the new variables NOr_revised and NOr_rev_loc
+```{r}
+# if nymph origin was clearly resolveable, the revisions were made in NOr_manual_revisions
+# updating NOr_status with revisions so that it can be left_joined to other data and
+# counts of nymphs and adults on NOr can be calculated
+NOr_status_revised_all_unambig_clutches <- NOr_status_resolveable_all_unambig_clutches %>%
+  left_join(NOr_manual_revisions, by = c("Date", "location")) %>%
+  group_by(Dorm, Plant) %>%
+    mutate(lone_hatcher_leaf = ifelse(length(unique(Leaf[!is.na(initiation_date)])) == 1,
+                                 unique(Leaf[!is.na(initiation_date)]),
+                                 NA),
+           NOr_revised = ifelse(!is.na(NOr_revised_manual),
+                                       NOr_revised_manual,
+                                ifelse(any(!is.na(lone_hatcher_leaf)),
+                                       lone_hatcher_leaf,
+                                       # if no clutches hatched on the plant, NOr_revised = Leaf
+                                       # for leaves with eggs
+                                       ifelse(!any(!is.na(hatch_date)) & !is.na(egg_num),
+                                              Leaf,
+                                              NA)))) %>%
+  ungroup() %>%  
+  group_by(location) %>%
+    mutate(NOr_revised = ifelse(any(NOr_revised == Leaf) & is.na(NOr_revised),
+                                Leaf,#unique(NOr_revised[!is.na(NOr_revised)]),
+                                NOr_revised)) %>%
+  ungroup() %>%
+  mutate(NOr_rev_loc = ifelse(is.na(NOr_revised),
+                              NA,
+                              paste0(Dorm, Plant, "_", NOr_revised))) %>%
+  select(Date, location, NOr_revised, NOr_rev_loc) %>%
+  filter(!is.na(NOr_rev_loc))
+
+All_data_v6_N_NOr_counts_unambig_clutches <- All_data_v6_clutch_status_stats_v2 %>%
+  right_join(NOr_status_revised_all_unambig_clutches, by = c("Date", "location")) %>%
+  group_by(Date, Dorm, Plant, NOr_revised, NOr_rev_loc) %>%
+    summarize(N1_NOr = sum(N1, na.rm= TRUE),
+              N2_NOr = sum(N2, na.rm= TRUE),
+              N5_NOr = sum(N5, na.rm= TRUE),
+              N_NOr = sum(N1, N2, N5, na.rm = TRUE),
+              A_NOr = sum(n_A, na.rm= TRUE),
+              N5plusA_NOr = sum(N5, n_A, na.rm= TRUE)) %>%
+  ungroup() # n = 186
+ 
+# All_data_v6_N_NOr_counts_unambig_clutches %>% distinct(Dorm, Plant, NOr_rev_loc) # n = 186
+
+All_data_v6_N_NOr_counts_unambig_clutches_summary <- All_data_v6_N_NOr_counts_unambig_clutches %>%
+  group_by(Date) %>%
+    mutate(mean_N_NOr = mean(N_NOr, na.rm = TRUE),
+           mean_N1_NOr = mean(N1_NOr, na.rm = TRUE),
+           mean_N2_NOr = mean(N2_NOr, na.rm = TRUE),
+           mean_N5_NOr = mean(N5_NOr, na.rm = TRUE),
+           mean_A_NOr = mean(A_NOr, na.rm = TRUE),
+           mean_N5plusA_NOr = mean(N5plusA_NOr, na.rm = TRUE),
+           All_N_NOr = sum(N_NOr),
+           All_A_NOr = sum(A_NOr)) %>%
+  ungroup() %>%
+  group_by(Date, Dorm) %>%
+    mutate(All_N_NOr_Dorm = sum(N_NOr),
+           All_N1_NOr_Dorm = sum(N1_NOr),
+           All_N2_NOr_Dorm = sum(N2_NOr),
+           All_N5_NOr_Dorm = sum(N5_NOr),
+           All_A_NOr_Dorm = sum(sum(A_NOr))) %>%
+  ungroup()
+
+ggplot(data = All_data_v6_N_NOr_counts_unambig_clutches_summary) +
+  geom_boxplot(aes(x = Date, y = N_NOr, group = Date)) +
+  geom_line(aes(x = Date, y = mean_N_NOr), color = "red")
+
+ggplot(data = All_data_v6_N_NOr_counts_unambig_clutches_summary) +
+  geom_line(aes(x = Date, y = mean_N_NOr), color = "black") +
+  geom_line(aes(x = Date, y = mean_N1_NOr), color = "green") +  
+  geom_line(aes(x = Date, y = mean_N2_NOr), color = "blue") +
+  geom_line(aes(x = Date, y = mean_N5_NOr), color = "purple") +
+  geom_line(aes(x = Date, y = mean_A_NOr), color = "pink") +
+  geom_line(aes(x = Date, y = mean_N5plusA_NOr), color = "red")
+
+ggplot(data = All_data_v6_N_NOr_counts_unambig_clutches_summary) +
+  geom_line(aes(x = Date, y = All_N_NOr), color = "black")
+
+ggplot(data = All_data_v6_N_NOr_counts_unambig_clutches_summary) +
+  geom_line(aes(x = Date, y = All_N_NOr_Dorm, color = Dorm))
+
+All_data_v6_all_nymphs_unambig_clutches <- All_data_v6_N_NOr_counts_unambig_clutches %>%
+  group_by(Date) %>%
+    summarize(All_N_NOr = sum(N_NOr)) %>%
+  ungroup()
+
+ggplot(data = All_data_v6_all_nymphs_unambig_clutches) +
+  geom_line(aes(x = Date, y = All_N_NOr), color = "black")
+
+All_data_v6_max_N_NOr_counts_unambig_clutches <-
+  All_data_v6_N_NOr_counts_unambig_clutches %>%
+  group_by(Dorm, Plant, NOr_revised, NOr_rev_loc) %>%
+    summarize(max_N_NOr = max(N_NOr)) %>%
+  ungroup()
+  
+clutch_status_stats_v1_unambig_clutches_hatch_success <- clutch_status_stats_v1 %>%
+  separate(location, c("DormPlant", "Leaf"), sep = "_", remove = FALSE) %>%
+  mutate(Dorm = substr(DormPlant, 1, 1),
+         Plant = substring(DormPlant, 2)) %>%
+  left_join(distinct(clutch_status_guarding_summary_v2, location, never_hatched)) %>%
+  right_join(All_data_v6_max_N_NOr_counts_unambig_clutches, by = c("Dorm", "Plant", "Leaf" = "NOr_revised")) %>%
+  # why did I originally say to make hatch_success = NA if never_hatched == TRUE?
+  mutate(hatch_success = ifelse(!is.na(initiation_date) & is.na(hatch_date),
+                                0,
+                                max_N_NOr/max_egg_num))
+```
+
+## 7.4 - Flag and resolve ambiguous nymph origins
+
+Is 190/ really the best we can do for the sample size of clutches with known hatching success?
+```{r}
+clutch_status_guarding_summary_v2 %>%
+# add number of clutches per plant
+  separate(location, c("DormPlant", "Leaf"), "_", remove = FALSE) %>%
+  mutate(Dorm = substr(DormPlant, 1,1),
+         Plant = substring(DormPlant, 2)) %>%
+  distinct(location, n_clutches_on_plant, initiation_date, any_NOr_ambig_loc) %>%
+  group_by(n_clutches_on_plant == 1, initiation_date <= as_date("2019-06-10"), any_NOr_ambig_loc) %>%
+  summarize(N = n()) %>%
+  ungroup()
+
+# there are 319 unique clutches with known inits that have not been flagged for ambig nymph origin in the field
+clutch_status_guarding_summary_v2 %>%
+# add number of clutches per plant
+  separate(location, c("DormPlant", "Leaf"), "_", remove = FALSE) %>%
+  mutate(Dorm = substr(DormPlant, 1,1),
+         Plant = substring(DormPlant, 2)) %>%
+  distinct(location, n_clutches_on_plant, initiation_date, any_NOr_ambig_loc) %>%
+  group_by(!is.na(initiation_date), any_NOr_ambig_loc) %>%
+  summarize(N = n()) %>%
+  ungroup()
+
+
+NOr_status_resolveable_all_unambig_clutches <- All_data_v6_clutch_status_stats_v2 %>% 
+  select(Date, Dorm, Plant, Leaf, location, 
+         egg_num, N1, N2, N5, n_A, nymph_origin, initiation_date, hatch_date,
+         any_NOr_ambig_loc, Omit_for_abandon_time, never_hatched,
+         n_clutches_on_plant) %>%
+  # keep only entries with some nymphs or adults on a leaf
+  # OR entries for leaves where clutches have been initiated
+  group_by(row_number()) %>%
+  filter(!is.na(Leaf) & any(N1 > 0, N2 > 0, N5 > 0, n_A > 0) | 
+           Date >= initiation_date) %>% # nrow = 17944
+  # flag entries where the nymph origin is text (typically ambiguous, e.g. "8 or 9")
+  mutate(NOr_ambig_entry = !is.na(nymph_origin) & is.na(as.numeric(nymph_origin))) %>% 
+  ungroup() %>%
+  # get rid of duplicate rows from multiple females in the same location
+  distinct(Date, location, .keep_all = TRUE) %>% # nrow = 15674
+  group_by(Dorm, Plant) %>%
+    # filter out any plants with a clutch that was omitted for abandon time
+    filter(!any(!is.na(Omit_for_abandon_time))) %>%
+    # flag plants with any ambiguous entries (e.g. "8 or 9") skip for checking
+    mutate(NOr_ambig_plant = any(NOr_ambig_entry)) %>%
+  ungroup()
+
+NOr_status_resolveable_all_unambig_clutches %>% 
+  filter(!is.na(initiation_date)) %>% 
+  distinct(location) # 314
+
+NOr_status_resolveable_mult_clutches <- NOr_status_resolveable_all_unambig_clutches %>% # nrow = 15674
+  group_by(Dorm, Plant) %>%
+    # plants with mutliple clutches only
+    filter(any(n_clutches_on_plant > 1)) %>%
+  ungroup() %>%
+  group_by(row_number()) %>%
+    # flag for manual checking entries with any nymphs/adults, missing nymph origin, 
+    # but not flagged for ambiguous origin in the field.
+    # these are the most likely to be easily resolved with minimal work
+    mutate(revise_NOr = ifelse(any(N1 > 0, N2 > 0, N5 > 0, n_A > 0) &
+             !NOr_ambig_plant,
+           "MANUAL CHECK",
+           NA)) %>% 
+  ungroup()
+
+NOr_status_resolveable_mult_clutches %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(location, revise_NOr) %>%
+  group_by(revise_NOr) %>%
+  summarize(n())
+
+############## looking at what clutches are NOT included in hatch success data
+clutch_status_stats_v1 %>%
+  separate(location, c("DormPlant", "Leaf"), sep = "_", remove = FALSE) %>%
+  mutate(Dorm = substr(DormPlant, 1, 1),
+         Plant = substring(DormPlant, 2)) %>%
+  left_join(distinct(clutch_status_guarding_summary, location, never_hatched)) %>%
+  full_join(All_data_v6_max_N_NOr_counts_unambig_clutches, by = c("Dorm", "Plant", "Leaf" = "NOr_revised")) %>%
+  # why are so many "never_hatched" NA?
+  mutate(hatch_success = ifelse(is.na(hatch_date),
+                                0,
+                                max_N_NOr/max_egg_num)) %>%
+  group_by(Dorm, Plant) %>%
+  mutate(any_NOr_ambig_loc_Plant = any(any_NOr_ambig_loc)) %>%
+  ungroup() %>%
+  filter(is.na(hatch_success), !any_NOr_ambig_loc_Plant) %>% View()
+
+
+hatch_success_tmp1 <- clutch_status_stats_v1 %>%
+  separate(location, c("DormPlant", "Leaf"), sep = "_", remove = FALSE) %>%
+  mutate(Dorm = substr(DormPlant, 1, 1),
+         Plant = substring(DormPlant, 2)) %>%
+  left_join(distinct(clutch_status_guarding_summary_v2, location, never_hatched)) %>%
+  full_join(All_data_v6_max_N_NOr_counts_unambig_clutches, by = c("Dorm", "Plant", "Leaf" = "NOr_revised")) %>%
+  # why are so many "never_hatched" NA?
+  mutate(hatch_success = ifelse(!is.na(initiation_date) & is.na(hatch_date),
+                                0,
+                                max_N_NOr/max_egg_num))
+
+# hatch_success_tmp1 %>%
+#   filter(!is.na(hatch_success), initiation_date <= as_date("2019-06-10")) %>% View()
+
+ggplot(data = filter(hatch_success_tmp1, initiation_date <= as_date("2019-06-10"))) +
+  geom_histogram(aes(x = hatch_success))
+
+```
+
+
+## 7.5 - Fixing the omission of clutches that never had first instar nymphs
+
+```{r}
+NOr_status_revised_all_unambig_clutches_v2 <- NOr_status_resolveable_all_unambig_clutches %>%
+  left_join(NOr_manual_revisions, by = c("Date", "location")) %>%
+  group_by(Dorm, Plant) %>%
+    mutate(lone_hatcher_leaf = ifelse(length(unique(Leaf[!is.na(initiation_date)])) == 1,
+                                 unique(Leaf[!is.na(initiation_date)]),
+                                 NA),
+           NOr_revised = ifelse(!is.na(NOr_revised_manual), # if I manually annotated a revised location
+                                       NOr_revised_manual, # make manual location the new nymph origin
+                                ifelse(any(!is.na(lone_hatcher_leaf)), # if only one clutch hatched on the plant
+                                       lone_hatcher_leaf, # make that clutch the new nymph origin
+                                       # if no clutches hatched on the plant, NOr_revised = Leaf
+                                       # for leaves with eggs
+                                       ifelse(!any(!is.na(hatch_date)) & !is.na(egg_num), # if no clutches hatched on the plant (but there are eggs)
+                                              Leaf, # make the given leaf the new nymph origin
+                                              NA)))) %>% # BUT THIS STILL EXCLUDES CLUTCHES THAT DIDN'T HATCH ON A PLANT WITH SOME CLUTCHES THAT DID HATCH
+  ungroup() %>%  
+  group_by(location) %>%
+    mutate(NOr_revised = ifelse(any(NOr_revised == Leaf) & is.na(NOr_revised), # DOES THIS INCLUDE UNHATCHED CLUTCHES? NO
+                                Leaf,#unique(NOr_revised[!is.na(NOr_revised)]),
+                                NOr_revised),
+           NOr_revised = ifelse(any(is.na(NOr_revised)) & # if no revised nymph origin yet
+                                                  any(!is.na(egg_num)&egg_num>0 & !any(!is.na(N1)&N1>0)), # and N1 never on clutch (not hatched or spuriously visited by N1)
+                                Leaf, # make this leaf the new nymph origin (so we include unhatched clutches)
+                                NOr_revised)) %>% 
+  ungroup() %>%
+  mutate(NOr_rev_loc = ifelse(is.na(NOr_revised),
+                              NA,
+                              paste0(Dorm, Plant, "_", NOr_revised))) %>%
+  select(Date, location, NOr_revised, NOr_rev_loc) %>%
+  filter(!is.na(NOr_rev_loc))
+
+All_data_v6_N_NOr_counts_unambig_clutches_v2 <- All_data_v6_clutch_status_stats_v2 %>%
+  right_join(NOr_status_revised_all_unambig_clutches_v2, by = c("Date", "location")) %>%
+  group_by(Date, Dorm, Plant, NOr_revised, NOr_rev_loc) %>%
+    summarize(N1_NOr = sum(N1, na.rm= TRUE),
+              N2_NOr = sum(N2, na.rm= TRUE),
+              N5_NOr = sum(N5, na.rm= TRUE),
+              N_NOr = sum(N1, N2, N5, na.rm = TRUE),
+              A_NOr = sum(n_A, na.rm= TRUE),
+              N5plusA_NOr = sum(N5, n_A, na.rm= TRUE)) %>%
+  ungroup() # n = 186
+ 
+# All_data_v6_N_NOr_counts_unambig_clutches %>% distinct(Dorm, Plant, NOr_rev_loc) # n = 186
+
+
+All_data_v6_N_NOr_counts_unambig_clutches_summary_v2 <- All_data_v6_N_NOr_counts_unambig_clutches_v2 %>%
+  group_by(Date) %>%
+    mutate(mean_N_NOr = mean(N_NOr, na.rm = TRUE),
+           mean_N1_NOr = mean(N1_NOr, na.rm = TRUE),
+           mean_N2_NOr = mean(N2_NOr, na.rm = TRUE),
+           mean_N5_NOr = mean(N5_NOr, na.rm = TRUE),
+           mean_A_NOr = mean(A_NOr, na.rm = TRUE),
+           mean_N5plusA_NOr = mean(N5plusA_NOr, na.rm = TRUE),
+           All_N_NOr = sum(N_NOr),
+           All_A_NOr = sum(A_NOr)) %>%
+  ungroup() %>%
+  group_by(Date, Dorm) %>%
+    mutate(All_N_NOr_Dorm = sum(N_NOr),
+           All_N1_NOr_Dorm = sum(N1_NOr),
+           All_N2_NOr_Dorm = sum(N2_NOr),
+           All_N5_NOr_Dorm = sum(N5_NOr),
+           All_A_NOr_Dorm = sum(sum(A_NOr))) %>%
+  ungroup()
+
+```
+
+
+# 8 - Calculate hatch success and nymph survivorship
+
+Calculate hatch success (strict sense; max N1 / max eggs) and nymph survivorship (max N5+A / max eggs AND/OR max N5+A / max N1)
+
+- Filtered out clutches with outlier numbers of N1 or N5 etc at early or late clutch ages, which were assumed to be cases of immigration that weren't caught during manual nymph origin filtering
+```{r}
+# Filter to only include curated list of clutches with unambiguous nymph counts after accounting for immigration to non-natal leaves and then sum all nymphs (including emigrants) for each clutch
+# I also added clutch_age variables to help identify clutches that were started too close to the end of sampling to be useful
+clutch_unambig_NOr_revised_ENAa_summary_v2 <- All_data_v6_clutch_status_stats_v2 %>%
+  right_join(NOr_status_revised_all_unambig_clutches_v2, by = c("Date", "location")) %>%
+  select(Date, NOr_rev_loc, location, egg_num, N1, N2, N5, n_A, ants_L) %>%
+    # remove any duplicates - I need to figure out why there are dups later but for 4th yr talk
+  distinct(Date, NOr_rev_loc, location, egg_num, N1, N2, N5, n_A, ants_L, .keep_all = TRUE) %>%
+  mutate(egg_num_NOr = ifelse(NOr_rev_loc == location, egg_num, NA)) %>%
+  group_by(Date, NOr_rev_loc) %>%
+    summarize(eggs_NOr = first(egg_num_NOr[!is.na(egg_num_NOr)]), # only use eggs from origin leaf!
+              N1_NOr = sum(N1, na.rm= TRUE),
+              N2_NOr = sum(N2, na.rm= TRUE),
+              N5_NOr = sum(N5, na.rm= TRUE),
+              N_NOr = sum(N1, N2, N5, na.rm = TRUE),
+              A_NOr = sum(n_A, na.rm= TRUE),
+              N5toA_NOr = sum(N5, n_A, na.rm= TRUE),
+              ants_NOr = sum(ants_L, na.rm = TRUE)) %>%
+  ungroup() %>%
+  left_join(filter(clutch_status_guarding_summary_v2, mom_at_init), by = c("NOr_rev_loc" = "location")) %>%
+  mutate(clutch_age1 = Date - initiation_date,
+         clutch_age2 = ceiling((Date - initiation_date)/2)*2,
+         clutch_age4 = ceiling((Date - initiation_date)/4)*4,
+         after_hatch1 = Date - hatch_date,
+         after_hatch2 = ceiling((Date - hatch_date)/2)*2,
+         after_hatch4 = ceiling((Date - hatch_date)/4)*4) %>%
+  select(Date, NOr_rev_loc, clutch_age1, after_hatch1, eggs_NOr, 
+         N1_NOr, N2_NOr, N5_NOr, N_NOr, A_NOr, N5toA_NOr, ants_NOr,
+         init_fem = Female_ID,
+         initiation_date, hatch_date, guard_duration, relative_desert_date,
+         clutch_initiated_order, females_removed, ants_removed, 
+         clutch_age2, clutch_age4, after_hatch2, after_hatch4) #%>%
+  # filter(initiation_date <= as_date("2019-06-10"),
+  #        clutch_age4 <= 68)
+
+max_N1_date_v2 <- clutch_unambig_NOr_revised_ENAa_summary_v2 %>%
+  group_by(NOr_rev_loc) %>%
+  arrange(NOr_rev_loc, desc(N1_NOr), Date) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(NOr_rev_loc, max_N1_date = Date, max_N1_age = clutch_age1)
+
+max_N5_date_v2 <- clutch_unambig_NOr_revised_ENAa_summary_v2 %>%
+  group_by(NOr_rev_loc) %>%
+  arrange(NOr_rev_loc, desc(N5_NOr), Date) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(NOr_rev_loc, max_N5_date = Date, max_N5_age = clutch_age1)
+
+max_A_date_v2 <- clutch_unambig_NOr_revised_ENAa_summary_v2 %>%
+  group_by(NOr_rev_loc) %>%
+  arrange(NOr_rev_loc, desc(A_NOr), Date) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(NOr_rev_loc, max_A_date = Date, max_A_age = clutch_age1)
+
+max_N5toA_date_v2 <- clutch_unambig_NOr_revised_ENAa_summary_v2 %>%
+  group_by(NOr_rev_loc) %>%
+  arrange(NOr_rev_loc, desc(N5toA_NOr), Date) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  select(NOr_rev_loc, max_N5toA_date = Date, max_N5toA_age = clutch_age1)
+
+max_N5toA_Date_v2 <- clutch_unambig_NOr_revised_ENAa_summary_v2 %>%
+  group_by(NOr_rev_loc) %>%
+  summarize(max_N1 = max(N1_NOr),
+            max_N5toA = max(N5toA_NOr),
+            max_clutch_age = max(clutch_age1),
+            max_after_hatch = max(after_hatch1),
+            max_Date = max(Date),
+            hatched = any(!is.na(hatch_date)),
+            initiation_date = first(initiation_date)) %>%
+  ungroup() %>%
+  arrange(desc(max_N5toA)) %>%
+  full_join(max_N1_date_v2) %>%
+  full_join(max_N5_date_v2) %>%
+  full_join(max_A_date_v2) %>%
+  full_join(max_N5toA_date_v2)
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = initiation_date, y = max_N5toA_age))
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = initiation_date, y = max_N1_age))
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = initiation_date, y = max_N5_age))
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = initiation_date, y = max_A_age))
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = max_clutch_age, y = max_N1, 
+                 color = initiation_date >= as_date("2019-06-10"))) 
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = initiation_date, y = max_N1)) 
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = max_clutch_age, y = max_N5toA, 
+                 color = initiation_date >= as_date("2019-06-10"))) 
+
+ggplot(data = max_N5toA_Date_v2) +
+  geom_point(aes(x = initiation_date, y = max_N5toA)) 
+
+clutch_unambig_NOr_revised_ENAa_summary_imfilt_v2 <- clutch_unambig_NOr_revised_ENAa_summary_v2 %>%
+  mutate(N_imm_likely_d15 = clutch_age1 < 15 & N_NOr > 0,
+         N5_imm_likely_d40 = clutch_age1 < 40 & N5_NOr > 0,
+         A_imm_likely_d40 = clutch_age1 < 40 & A_NOr > 0) %>%
+  group_by(NOr_rev_loc) %>%
+    filter(!any(N_imm_likely_d15, N5_imm_likely_d40, A_imm_likely_d40, na.rm = TRUE)) %>% # n = 168
+  ungroup()
+          
+clutch_unambig_NOr_revised_ENAa_summary_imfilt_success_v2 <-
+  clutch_unambig_NOr_revised_ENAa_summary_imfilt_v2 %>%
+  group_by(NOr_rev_loc) %>%
+    mutate(hatch_success_N1 = max(N1_NOr, na.rm = TRUE)/max(eggs_NOr, na.rm = TRUE),
+           survival_rate = max(N5toA_NOr, na.rm = TRUE)/max(eggs_NOr, na.rm = TRUE),
+           prop_E2Ni = max(N1_NOr, na.rm = TRUE)/max(eggs_NOr, na.rm = TRUE),
+           prop_E2N = max(N_NOr, na.rm = TRUE)/max(eggs_NOr, na.rm = TRUE),
+           prop_Ni2Nv = max(N5toA_NOr, na.rm = TRUE)/max(N1_NOr, na.rm = TRUE),
+           prop_E2Nv = max(N5toA_NOr, na.rm = TRUE)/max(eggs_NOr, na.rm = TRUE),
+           n_eggs = max(eggs_NOr, na.rm = TRUE),
+           n_hatched = max(N1_NOr, na.rm = TRUE),
+           n_N = max(N_NOr, na.rm = TRUE),
+           n_survived = max(N5toA_NOr, na.rm = TRUE)) %>%
+  ungroup()
+
+clutch_unambig_NOr_revised_ENAa_summary_imfilt_success_summary_v2 <- clutch_unambig_NOr_revised_ENAa_summary_imfilt_success_v2 %>%
+  distinct(NOr_rev_loc, n_eggs, n_hatched, n_survived, n_N,
+           prop_E2Ni, prop_Ni2Nv, prop_E2Nv, prop_E2N, hatch_success_N1, survival_rate,
+           initiation_date, hatch_date, females_removed, ants_removed) 
+```
+
+# 9 - Ant counts on clutch
+
+## 9.1 - Some fraction of ants_removed clutches were visited by ants, and vice versa
+```{r}
+ant_counts <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch) %>%
+    summarize(ants_removed=first(ants_removed),
+              females_removed=first(females_removed),
+              n_antsP=sum(ants_P,na.rm=T),
+              ever_antsP=n_antsP>0,
+              mean_antsP=mean(ants_P,na.rm=T),
+              med_antsP=median(ants_P,na.rm=T),
+              
+              n_antsP_b4h=sum(ants_P&b4h),
+              ever_antsP_b4h=n_antsP_b4h>0,
+              mean_antsP_b4h=mean(ifelse(b4h,ants_P,NA),na.rm=T),
+              med_antsP_b4h=median(ifelse(b4h,ants_P,NA),na.rm=T),
+              
+              n_antsP_afh=sum(ants_P&afh),
+              ever_antsP_afh=n_antsP_afh>0,
+              mean_antsP_afh=mean(ifelse(afh,ants_P,NA),na.rm=T),
+              med_antsP_afh=median(ifelse(afh,ants_P,NA),na.rm=T)) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ant_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+ggplot(data=ant_counts,aes(x=Dorm,y=n_antsP, fill=ant_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP, fill=ant_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_b4h, fill=ant_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_afh, fill=ant_treatment)) +
+  geom_boxplot()
+
+ant_counts %>%
+  count(Dorm,ant_treatment,ever_antsP)
+
+ant_counts %>%
+  count(Dorm,ant_treatment,ever_antsP_b4h)
+
+ant_counts %>%
+  count(Dorm,ant_treatment,ever_antsP_afh)
+
+# how many clutches ever had ants in each of the dorms?
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP), x=Dorm, fill=ant_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP_b4h), x=Dorm, fill=ant_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP_afh), x=Dorm, fill=ant_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+# how extreme was the break-through?
+ant_counts %>%
+  ggplot(data=., aes(x=mean_antsP_b4h, color=ant_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly(bins=100)
+
+ant_counts %>%
+  ggplot(data=., aes(x=med_antsP_b4h, color=ant_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly()
+
+ant_counts %>%
+  ggplot(data=., aes(x=mean_antsP_afh, color=ant_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly(bins=100)
+
+ant_counts %>%
+  ggplot(data=., aes(x=med_antsP_afh, color=ant_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly()
+
+# how many clutches actually ever had ants vs. not?
+ant_counts %>%
+  ggplot(data=., aes(x=ever_antsP_b4h, fill=ant_treatment)) +
+  geom_bar() +
+  theme_publilia() + facet_wrap(~females_removed)
+
+ant_counts %>%
+  ggplot(data=., aes(x=ever_antsP_afh, fill=ant_treatment)) +
+  geom_bar() +
+  theme_publilia() + facet_wrap(~females_removed)
+
+ant_counts %>%
+  ggplot(data=., aes(x=ever_antsP_b4h|ever_antsP_afh, fill=ant_treatment)) +
+  geom_bar() +
+  theme_publilia() + facet_wrap(~females_removed)
+
+```
+
+Should I be more lenient with my threshold, so I can have more even sample sizes between "ants" and "no ants"?
+- ants_ever = n_days_ants>0: F = 95-12=83, T = 234-91=143
+- antsP_gt2d = n_days_ants>2: F = 156-33=123, T = 173-70=103 * most even sample size
+- antsP_gt3d = n_days_ants>3: F = 172-39=133, T = 157-64=90
+```{r}
+ant_n_days <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  mutate(ant_treatment=ifelse(ants_removed,"Ants removed","Control"),
+         Dorm=substr(location,1,1)) %>%
+  group_by(Date, location) %>%
+    summarize(any_antsP_day = any(ants_P>0, na.rm=T),
+              females_removed = first(females_removed),
+              ant_treatment = first(ant_treatment),
+              Dorm = first(Dorm)) %>%
+  ungroup() %>%
+  group_by(location) %>%
+    summarize(n_days_ants = sum(as.numeric(any_antsP_day)),
+              females_removed = first(females_removed),
+              ant_treatment = first(ant_treatment),
+              Dorm = first(Dorm))%>%
+  ungroup() %>%
+  mutate(antsP_gt2d = !is.na(n_days_ants)&n_days_ants>2,
+         antsP_gt3d = !is.na(n_days_ants)&n_days_ants>3,
+         ants_everP = is.na(n_days_ants)|n_days_ants>0)
+  
+ggplot(ant_n_days, aes(x=Dorm, y=n_days_ants, fill=ant_treatment)) +
+  geom_boxplot()
+
+ggplot(ant_n_days, aes(x=Dorm, y=n_days_ants, fill=ant_treatment)) +
+  geom_violin() +
+  geom_hline(yintercept=2.5)
+
+ant_n_days %>%
+  select(-location) %>%
+  tbl_summary(by=ants_everP)
+
+ant_n_days %>%
+  select(-location) %>%
+  tbl_summary(by=antsP_gt2d)
+
+ant_n_days %>%
+  select(-location) %>%
+  tbl_summary(by=antsP_gt3d)
+```
+
+
+# 10 - Calculate alternative measures of maternal tenure
+
+`The sum of all females’ egg-guarding durations was more predictive of final clutch size than egg guarding duration of the initiator alone (Table S1 with alternative models and their AICs), showing that females lay eggs while visiting existing clutches.`
+```{r}
+visited_1st_4d_data_tb
+visited_1st_4d_data_tb %>% filter(!is.na(initiation_date))
+visited_1st_4d_data_tb %>% filter(!is.na(initiation_date), !is.na(num_at_init))
+
+##### initiator guarding time: mDb4h
+initiator_days_b4hatch <- visited_1st_4d_data_tb %>%
+  filter(!is.na(initiation_date),
+         # exclude clutches for which the initiators are not known
+         !is.na(num_at_init),
+         mom_at_init) %>%
+  group_by(row_number()) %>%
+  # Use median init to hatch interval (20 days) to est hatch date of clutch with no hatch date
+  mutate(init_dur = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+                           visit_ends-initiation_date+1, 
+                           NA),
+         initMb4hatch = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+           min(est_hatch, visit_ends) - 
+           max(initiation_date, visit_starts) + 1,
+           ifelse(visit_starts > est_hatch | visit_ends < initiation_date,
+                  NA,
+                  NA)),
+         initMb4h_sc2h = initMb4hatch/as.numeric((est_hatch-initiation_date+1))) %>%
+  ungroup()
+
+initMb4h_tbL <- initiator_days_b4hatch %>%
+  filter(initL) %>%
+  select(location, desert_rel2hL=est_rel2h, init_durL=init_dur, initMb4h_tbL=initMb4hatch, initMb4h_sc2hL=initMb4h_sc2h,
+         females_removed, ants_removed, initiation_date, num_at_init,
+         initiator_tbL=Female_ID, n_clutches_on_plant)
+
+initMb4h_tbS <- initiator_days_b4hatch %>%
+  filter(initS) %>%
+  select(location, desert_rel2hS=est_rel2h, init_durS=init_dur, initMb4h_tbS=initMb4hatch, initMb4h_sc2hS=initMb4h_sc2h,
+         females_removed, ants_removed, initiation_date, num_at_init,
+         initiator_tbS=Female_ID, n_clutches_on_plant)
+
+##### proportional time: mDb4h
+focalMb4h_sc2h <- visited_1st_4d_data_tb  %>%
+  # exclude visits to leaves that never had eggs; only interested in clutches
+  filter(!is.na(initiation_date),
+         # exclude clutches for which the initiators are not known (why?)
+         !is.na(num_at_init)) %>%
+  group_by(row_number()) %>%
+  # Use median init to hatch interval (20 days) to est hatch date of clutch with no hatch date
+  mutate(mD = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+                     visit_ends-initiation_date+1,
+                     NA),
+         days_guard_b4hatch = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+           min(est_hatch, visit_ends) - 
+           max(initiation_date, visit_starts) + 1,
+           ifelse(visit_starts > est_hatch | visit_ends < initiation_date,
+                  NA,
+                  NA)),
+         focalMb4h_sc2h = days_guard_b4hatch/as.numeric((est_hatch-initiation_date+1))) %>%
+  ungroup()
+
+clutch_momDays_b4h <- focalMb4h_sc2h %>%
+  group_by(location) %>%
+    summarize(sum_mD = sum(mD, na.rm=T),
+              sum_vD = sum(mD*!mom_at_init, na.rm=T),
+              sum_gD = sum(mD*mom_at_init, na.rm=T),
+              vDb4h_sc2h = sum(days_guard_b4hatch*!mom_at_init, na.rm = T)/
+                # scale to init-hatch interval so clutches with different intervals are comparable 
+                as.numeric(first(est_hatch)-first(initiation_date)+1),
+              gDb4h_sc2h = sum(days_guard_b4hatch*mom_at_init, na.rm = T)/
+                as.numeric((first(est_hatch)-first(initiation_date)+1)),
+              mDb4h_sc2h = sum(days_guard_b4hatch, na.rm = T)/
+                as.numeric((first(est_hatch)-first(initiation_date)+1))) %>%
+  ungroup()
+
+clutch_status_momDays_b4h <- visited_1st_4d_data_tb %>%
+  distinct(location, initiation_date, hatch_date, num_at_init,
+           females_removed, ants_removed, egg_fate, egg_fate_date,
+           max_egg_num, max_egg_len, `visited in 4 days`) %>%
+  right_join(clutch_momDays_b4h, by=c("location")) %>%
+  left_join(top5eggs_summary)
+
+#### latest desertion
+latest_desertions <- visited_1st_4d_data %>%
+  filter(!is.na(initiation_date),
+         !(visit_ends<initiation_date), # visits that end before initiation are irrelevant
+         !(visit_starts>est_hatch+4)) %>% # there are a few cases where clutches are visited long after hatching, which wouldn't affect hatching success
+  left_join(first_visit_cuts) %>%
+  select(Female_ID:visit_ends, initiation_date, est_hatch, est_rel2h, 
+         `visited in 4 days`, mom_at_init, ants_removed, females_removed) %>%
+  group_by(location) %>%
+  filter(any(mom_at_init)) %>% # remove any clutches where there was no apparent mother at initiation
+  summarize(last_des_rel2h = max(ifelse(visit_starts<=initiation_date, est_rel2h, NA), na.rm=T),
+            first_des_rel2h_init = min(ifelse(mom_at_init, est_rel2h, NA), na.rm=T),
+            last_desert = ifelse(last_des_rel2h>=-2, "after hatch",
+                                 ifelse(last_des_rel2h<=0, "before hatch", NA)),
+            females_removed = first(females_removed),
+            ants_removed = first(ants_removed),
+            `visited in 4 days` = first(`visited in 4 days`),
+            init_desert_early = ifelse(first(first_des_rel2h_init<=-16), "deserted early", "didn't desert early"),
+            est_hatch = first(est_hatch)) %>%
+  ungroup() #%>%
+  # filter(!is.na(`visited in 4 days`)) %>% # E40_9 for some reason didn't get a valid visited in 4 days entry
+  # filter(location!="A23_8") %>% # A23_8 has two moms at init but for some reason not `visited in 4 days`?
+
+
+#### combine the three (but after getting more comfortable with the "latest_desertions" results I can omit the initL/S for simplicity)
+clutch_egg_num_data <- latest_desertions %>%
+  left_join(initMb4h_tbL) %>%
+  left_join(initMb4h_tbS) %>%
+  separate(location, sep = "_", into = c("DormPlant"),  remove = FALSE, extra = "drop") %>%
+  left_join(select(clutch_status_momDays_b4h, location, sum_mD, sum_vD, sum_gD,
+                   mDb4h_sc2h, gDb4h_sc2h, vDb4h_sc2h, max_egg_num, max_egg_len,
+                   `visited in 4 days`)) %>%
+  # if tbL and tbS are not the same female, add the female that lost the tie-break to the total sum of visit days
+  mutate(sum_vD_initL = ifelse(initiator_tbL!=initiator_tbS,
+                           sum_vD+init_durS, sum_vD),
+         sum_vD_initS = ifelse(initiator_tbS!=initiator_tbL,
+                           sum_vD+init_durL, sum_vD),
+         visited = vDb4h_sc2h > 0,
+         pmDvD = vDb4h_sc2h/mDb4h_sc2h) %>%
+  left_join(top5eggs_summary) %>%
+  select(location, last_des_rel2h, first_des_rel2h_init,
+         ants_removed, females_removed, initiation_date, est_hatch, `visited in 4 days`,
+         sum_mD, sum_vD, sum_gD, mDb4h_sc2h,
+         num_at_init, init_desert_early, last_desert,
+         n_eggs = max_egg_num, med_t5eggs, mean_t5eggs, max_n_eggs,
+         max_egg_len, med_l_t5eggs, mean_l_t5eggs, max_l_eggs,
+         init_durL, init_durS, desert_rel2hL, desert_rel2hS,
+         sum_vD_initL, sum_vD_initS, initMb4h_sc2hL, initMb4h_sc2hS,
+         initiator_tbL, initiator_tbS,
+         n_clutches_on_plant, visited, pmDvD, DormPlant)
+
+# add filtered and curated nymph and adult counts
+clutch_survivorship_data <- clutch_egg_num_data %>%
+  left_join(select(clutch_unambig_NOr_revised_ENAa_summary_imfilt_success_summary_v2,
+                   -c(ants_removed, females_removed, initiation_date, n_eggs)),
+            by=c("location"="NOr_rev_loc"))
+
+# older version so I can compare
+clutch_egg_num_success_data_old <- initMb4h_tbL %>%
+  left_join(initMb4h_tbS) %>%
+  separate(location, sep = "_", into = c("DormPlant"),  remove = FALSE, extra = "drop") %>%
+  left_join(select(clutch_status_momDays_b4h, location, mDb4h_sc2h, gDb4h_sc2h, vDb4h_sc2h, max_egg_num)) %>%
+  mutate(visited = vDb4h_sc2h > 0,
+         pmDvD = vDb4h_sc2h/mDb4h_sc2h) %>%
+  # left_join(select(pDaysb4h_ants_moms, location, anyMb4h)) %>%
+  # left_join(select(clutch_status_uDur_b4h, location, uDur_norm)) %>%
+  # select(location, initMb4h_sc2hL, initMb4h_sc2hS, desert_rel2hL, desert_rel2hS, mDb4h_sc2h,
+  #        anyMb4h, uDur_norm, females_removed, ants_removed, initiation_date, num_at_init, 
+  #        n_eggs = max_egg_num, initiator_tbL, initiator_tbS, n_clutches_on_plant, 
+  #        visited, visited_early, pmDvD, DormPlant) %>%
+  left_join(select(clutch_unambig_NOr_revised_ENAa_summary_imfilt_success_summary_v2, 
+                   -females_removed, -ants_removed, -initiation_date, -n_eggs), by=c("location"="NOr_rev_loc"))
+  # filter(initiation_date <= as_date("2019-06-10"), n_hatched/n_eggs <= 0.80)
+
+```
+
+
 

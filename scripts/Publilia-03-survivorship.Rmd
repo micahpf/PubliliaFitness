@@ -1,0 +1,939 @@
+---
+title: "Publilia-03-survivorship.Rmd"
+author: "micah fletcher"
+date: "8/4/2023"
+output: html_document
+---
+
+## Required libraries and functions
+```{r}
+library(tidyverse)
+library(lubridate)
+library(ggpubr)
+library(ggh4x)
+library(rstatix)
+library(emmeans)
+library(effectsize)
+library(gt)
+library(gtsummary)
+theme_gtsummary_compact()
+library(flextable)
+library(multcompView)
+library(here)
+
+theme_publilia <- function(){
+  theme_bw() +
+    theme(text = element_text(family = "Arial"),
+          axis.text = element_text(size = 12), 
+          axis.title = element_text(size = 14),
+          axis.line.x = element_line(color="black"), 
+          axis.line.y = element_line(color="black"),
+          panel.border = element_blank(),
+          panel.grid.major.x = element_blank(),                                          
+          panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.grid.major.y = element_blank(),  
+          plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), units = , "cm"),
+          plot.title = element_text(size = 18, vjust = 1, hjust = 0.5, face = "bold"),
+          legend.text = element_text(size = 10),          
+          legend.title = element_blank(),                              
+          # legend.position = c(0.90, 0.90), 
+          legend.key = element_blank(),
+          legend.background = element_rect(color = "black", 
+                                           fill = "transparent", 
+                                           size = 2, linetype = "blank"))
+}
+```
+
+# 0 - Data import
+
+clutch_status_guarding_summary_v2
+```{r}
+All_data_v6 <- read_rds(here("saved_rds/All_data_v6.rds"))
+
+clutch_status_guarding_summary_v2 <- read_rds(here("saved_rds/clutch_status_guarding_summary_v2.rds"))
+# last_day_fID <- read_rds(here("saved_rds/last_day_fID.rds"))
+# 
+# strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
+```
+
+# Final figures and stats using functions
+Use the same data for each regression
+```{r}
+# I originally used the ants_removed as the predictor representing ants, but I am now redoing the analysis using whether ants were ever observed at the clutch.
+surv_reg_data <- clutch_survivorship_data %>% 
+  filter(!is.na(`visited in 4 days`)) %>%
+  select(location, med_t5eggs, n_hatched, n_survived,
+         des=last_des_rel2h, ants_removed, vis=`visited in 4 days`,
+         females_removed, initiation_date, est_hatch) %>%
+  mutate(n_survived = ifelse(n_survived/n_hatched > 1,# if n_survived/n_hatched>1
+                             n_hatched, n_survived), # force n_survived/n_hatched=1
+         ant_treatment=ifelse(ants_removed, "Removed", "Control")) %>%
+  left_join(select(ant_counts, location, 
+                   ever_antsP_b4h, ever_antsP_afh, ever_antsP)) %>%
+  mutate(ants_b4h=ifelse(ever_antsP_b4h," ever", " never"),
+         ants_afh=ifelse(ever_antsP_afh," ever"," never"),
+         ants_ever=ifelse(ever_antsP," ever"," never")) %>%
+  left_join(select(ant_n_days, -ants_everP, -ant_treatment, -females_removed)) %>%
+  mutate(ants_gt2d=ifelse(antsP_gt2d," ants", " no ants"),
+         ants_gt3d=ifelse(antsP_gt3d," ants", " no ants")) %>% 
+  separate(location, into = c("DormPlant", "Leaf"), sep="_", remove=FALSE) %>%
+  left_join(dplyr::select(moms_plant_data, DormPlant, last_visit_ends_P), by="DormPlant") %>%
+  mutate(last_desP_rel2h = last_visit_ends_P-est_hatch,
+         desP = last_desP_rel2h) 
+```
+
+# Final (really this time) figures for the dissertation
+Choosing the models strictly based on qAICc leads to some odd results that make biological interpretation too complciated.
+
+Hatching success: All model types are within ~2 qAICc of each other, so pick whichever shows the biology best and is most consistent with Nsurv and Esurv.
+
+Nymph survivorship: desP * ants_ever * desP^2 has the best qAICc, and the desL version has the second best. The desL version (which, for biological interpretation's sake, should be in the main figure) has very wide 95% CI on the left side, which sends off alarm bells that model fit may be a less robust to addition or subtraction of samples than the AIC suggests. 
+
+Egg survivorship: desL * ants_ever * desL^2  has best qAICc, by far. Again the left side 95% CI is huge and it just looks terrible, suggesting to me that there may be too few influential points on the right side to conclusively support the convex up shape.
+
+One problem with the ants_ever method is that the `never ants` level has a much smaller sample size than the `ever ants` level. I'm worried that this could make conclusive inference on the difference among these treatments or even just slope and shape could be shaky. Breaking the groups into `ants >2 days` vs `ants <=2 days` solves the unequal sample sizes problem and makes the desL figure more straightforward to interpret. The qAICc is considerably worse, but I'm concerned that it is only because ants ever was overfitting with too little data.
+
+So, I'm making `desL * ants_gt2 * desL^2` the main figure and `desP * ants_gt2 * desP^2` the supplemental figure. I will report the qAICc of these two models, but not in a table. The data summary table, regression table and results text will need to change too.
+
+*******
+
+After running all these new regressions, I realize that the desL * ant treatment quadratic model has the lowest qAICc and the most interpretable plot and summary stats. I will use this instead.
+
+And since the desP models perform poorly (both in terms of AICc and a convex up Nsurv fit), I just won't even include them in the supplement. I can include the desL `ants >2 days` in the supplement, but honestly it might not even be necessary since it looks so similar to the treatment-based model. I can just mention they are similar?
+
+# Main - `desL * ants_gt2 * desL^2`
+
+## Tables
+```{r}
+(surv_reg_data.tbl_summary.desL.ants_gt2d <- surv_reg_data %>%
+  mutate(ants = ifelse(ants_gt2d==" ants", "ants >2 days", "ants <=2 days"),
+         females = ifelse(females_removed, "Females removed", "Control"),
+         `leaf desert date rel. hatch` = des,
+         `visited early` = vis,
+         `n eggs` = med_t5eggs,
+         `n hatched` = n_hatched,
+         `n survived` = n_survived) %>%
+  select(ants, females, `leaf desert date rel. hatch`, `visited early`, 
+         `n eggs`, `n hatched`, `n survived`) %>%
+  group_by(females, ants) %>%
+  tbl_summary(by = ants) %>%
+  bold_labels() %>% italicize_levels() %>%
+  add_n())
+
+surv_reg_data.tbl_summary.desL.ants_gt2d %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv_reg_data.tbl_summary.desL.ants_gt2d.docx")
+```
+
+```{r}
+hatch.desL.ants_gt2d.quad.qb.tbl <- 
+  tbl_regression(des_hatch.desL.ants_gt2d.quad.fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ants_gt2d ~ "Ants >2 days")) %>% bold_p()
+Nsurv.desL.ants_gt2d.quad.qb.tbl <- 
+  tbl_regression(des_Nsurv.desL.ants_gt2d.quad.fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ants_gt2d ~ "Ants >2 days")) %>% bold_p()
+Esurv.desL.ants_gt2d.quad.qb.tbl <- 
+  tbl_regression(des_Esurv.desL.ants_gt2d.quad.fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ants_gt2d ~ "Ants >2 days")) %>% bold_p()
+
+(desL.ants_gt2d.quad.qb.tbl.merge <- 
+  tbl_merge(
+    tbls = list(hatch.desL.ants_gt2d.quad.qb.tbl, 
+                Nsurv.desL.ants_gt2d.quad.qb.tbl, 
+                Esurv.desL.ants_gt2d.quad.qb.tbl),
+    tab_spanner = c("**Hatching success**", 
+                    "**Survivorship of nymphs**", 
+                    "**Survivorship of eggs**")
+  ) %>%
+  modify_header(label = "**Variable**") %>%
+  bold_labels() %>% italicize_levels())
+
+desL.ants_gt2d.quad.qb.tbl.merge %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv.reg_summary.desL.ants_gt2d.quad.docx")
+```
+
+## Figures
+```{r}
+# hatching success
+des_hatch.desL.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_hatched, survDen=med_t5eggs,
+                              tenure=des, treatment=ants_gt2d)
+
+des_hatch.desL.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ants_gt2d,
+              survNom=n_hatched, survDen=med_t5eggs,
+              model = des_hatch.desL.ants_gt2d.quad.fits$mai.qb)
+
+des_hatch.desL.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_hatch.desL.ants_gt2d.quad.qb.ci, 
+                                  tenure=des, treatment=ants_gt2d,
+             survNom = n_hatched, survDen = med_t5eggs) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# nymph survivorship
+des_Nsurv.desL.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=n_hatched,
+                              tenure=des, treatment=ants_gt2d)
+
+des_Nsurv.desL.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ants_gt2d,
+              survNom=n_survived, survDen=n_hatched,
+              model = des_Nsurv.desL.ants_gt2d.quad.fits$mai.qb)
+
+des_Nsurv.desL.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_Nsurv.desL.ants_gt2d.quad.qb.ci, 
+                                  tenure=des, treatment=ants_gt2d,
+             survNom = n_survived, survDen = n_hatched) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Survivorship of nymphs\n(5th instars/nymphs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# egg survivorship
+des_Esurv.desL.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=med_t5eggs,
+                              tenure=des, treatment=ants_gt2d)
+
+des_Esurv.desL.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ants_gt2d,
+              survNom=n_survived, survDen=med_t5eggs,
+              model = des_Esurv.desL.ants_gt2d.quad.fits$mai.qb)
+
+des_Esurv.desL.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_Esurv.desL.ants_gt2d.quad.qb.ci, 
+                                  tenure=des, treatment=ants_gt2d,
+             survNom = n_survived, survDen = med_t5eggs) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Survivorship of eggs\n(5th instars/eggs)") + 
+    scale_color_manual(values = c("brown1", "black"), labels = c("ants > 2 days", "ants ≤ 2 days")) +
+    scale_fill_manual(values = c("brown1", "black"), labels = c("ants > 2 days", "ants ≤ 2 days"))
+  
+
+(desL.ants_gt2d.quad.qb.p <- egg::ggarrange(des_hatch.desL.ants_gt2d.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Nsurv.desL.ants_gt2d.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Esurv.desL.ants_gt2d.quad.qb.p+
+                 theme(legend.position=c(0.8,0.95))+ylim(0,1),
+               labels=c("A","B","C"),
+               ncol=3))
+
+ggsave("desL.ants_gt2d.quad.final.png",
+       desL.ants_gt2d.quad.qb.p,
+       device="png", width = 300, height = 110, units = "mm", dpi = "print")
+```
+
+# Supp 1 -`desL * ants_treatment * desL^2`
+## Figures
+```{r}
+# hatching success
+des_hatch.desL.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_hatched, survDen=med_t5eggs,
+                              tenure=des, treatment=ant_treatment)
+
+des_hatch.desL.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ant_treatment,
+              survNom=n_hatched, survDen=med_t5eggs,
+              model = des_hatch.desL.ant_treatment.quad.fits$mai.qb)
+
+des_hatch.desL.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_hatch.desL.ant_treatment.quad.qb.ci, 
+                                  tenure=des, treatment=ant_treatment,
+             survNom = n_hatched, survDen = med_t5eggs) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# nymph survivorship
+des_Nsurv.desL.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=n_hatched,
+                              tenure=des, treatment=ant_treatment)
+
+des_Nsurv.desL.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ant_treatment,
+              survNom=n_survived, survDen=n_hatched,
+              model = des_Nsurv.desL.ant_treatment.quad.fits$mai.qb)
+
+des_Nsurv.desL.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_Nsurv.desL.ant_treatment.quad.qb.ci, 
+                                  tenure=des, treatment=ant_treatment,
+             survNom = n_survived, survDen = n_hatched) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Survivorship of nymphs\n(5th instars/nymphs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# egg survivorship
+des_Esurv.desL.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=med_t5eggs,
+                              tenure=des, treatment=ant_treatment)
+
+des_Esurv.desL.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ant_treatment,
+              survNom=n_survived, survDen=med_t5eggs,
+              model = des_Esurv.desL.ant_treatment.quad.fits$mai.qb)
+
+des_Esurv.desL.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_Esurv.desL.ant_treatment.quad.qb.ci, 
+                                  tenure=des, treatment=ant_treatment,
+             survNom = n_survived, survDen = med_t5eggs) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Survivorship of eggs\n(5th instars/eggs)") + 
+    scale_color_manual(values = c("brown1", "black"), labels = c("Control", "Ant Exclusion")) +
+    scale_fill_manual(values = c("brown1", "black"), labels = c("Control", "Ant Exclusion"))
+  
+
+(desL.ant_treatment.quad.qb.p <- egg::ggarrange(des_hatch.desL.ant_treatment.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Nsurv.desL.ant_treatment.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Esurv.desL.ant_treatment.quad.qb.p+
+                 theme(legend.position=c(0.8,0.95))+ylim(0,1),
+               labels=c("A","B","C"),
+               ncol=3))
+
+ggsave("desL.ant_treatment.quad.final.png",
+       desL.ant_treatment.quad.qb.p,
+       device="png", width = 300, height = 110, units = "mm", dpi = "print")
+```
+
+## Tables
+```{r}
+(surv_reg_data.tbl_summary.desL.ant_treatment <- surv_reg_data %>%
+  mutate(ants = ant_treatment,
+         females = ifelse(females_removed, "Females removed", "Control"),
+         `leaf desert date rel. hatch` = des,
+         `visited early` = vis,
+         `n eggs` = med_t5eggs,
+         `n hatched` = n_hatched,
+         `n survived` = n_survived) %>%
+  select(ants, females, `leaf desert date rel. hatch`, `visited early`, 
+         `n eggs`, `n hatched`, `n survived`) %>%
+  group_by(females, ants) %>%
+  tbl_summary(by = ants) %>%
+  bold_labels() %>% italicize_levels() %>%
+  add_n())
+
+surv_reg_data.tbl_summary.desL.ant_treatment %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv_reg_data.tbl_summary.desL.ant_treatment.docx")
+```
+
+```{r}
+hatch.desL.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_hatch.desL.ant_treatment.quad.fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+Nsurv.desL.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_Nsurv.desL.ant_treatment.quad.fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+Esurv.desL.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_Esurv.desL.ant_treatment.quad.fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+
+(desL.ant_treatment.quad.qb.tbl.merge <- 
+  tbl_merge(
+    tbls = list(hatch.desL.ant_treatment.quad.qb.tbl, 
+                Nsurv.desL.ant_treatment.quad.qb.tbl, 
+                Esurv.desL.ant_treatment.quad.qb.tbl),
+    tab_spanner = c("**Hatching success**", 
+                    "**Survivorship of nymphs**", 
+                    "**Survivorship of eggs**")
+  ) %>%
+  modify_header(label = "**Variable**") %>%
+  bold_labels() %>% italicize_levels())
+
+desL.ant_treatment.quad.qb.tbl.merge %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv.reg_summary.desL.ants_treatment.quad.docx")
+```
+
+
+
+# Supp 2 -`desP * ants_gt2 * desP^2`
+## Figures
+```{r}
+# hatching success
+des_hatch.desP.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_hatched, survDen=med_t5eggs,
+                              tenure=desP, treatment=ants_gt2d)
+
+des_hatch.desP.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data, 
+              tenure=desP, treatment=ants_gt2d,
+              survNom=n_hatched, survDen=med_t5eggs,
+              model = des_hatch.desP.ants_gt2d.quad.fits$mai.qb)
+
+des_hatch.desP.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_hatch.desP.ants_gt2d.quad.qb.ci, 
+                                  tenure=desP, treatment=ants_gt2d,
+             survNom = n_hatched, survDen = med_t5eggs) +
+    xlab("Latest desertion date from plant\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# nymph survivorship
+des_Nsurv.desP.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=n_hatched,
+                              tenure=desP, treatment=ants_gt2d)
+
+des_Nsurv.desP.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data, 
+              tenure=desP, treatment=ants_gt2d,
+              survNom=n_survived, survDen=n_hatched,
+              model = des_Nsurv.desP.ants_gt2d.quad.fits$mai.qb)
+
+des_Nsurv.desP.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_Nsurv.desP.ants_gt2d.quad.qb.ci, 
+                                  tenure=desP, treatment=ants_gt2d,
+             survNom = n_survived, survDen = n_hatched) +
+    xlab("Latest desertion date from plant\nrelative to hatch") +
+    ylab("Survivorship of nymphs\n(5th instars/nymphs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# egg survivorship
+des_Esurv.desP.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=med_t5eggs,
+                              tenure=desP, treatment=ants_gt2d)
+
+des_Esurv.desP.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data, 
+              tenure=desP, treatment=ants_gt2d,
+              survNom=n_survived, survDen=med_t5eggs,
+              model = des_Esurv.desP.ants_gt2d.quad.fits$mai.qb)
+
+des_Esurv.desP.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_Esurv.desP.ants_gt2d.quad.qb.ci, 
+                                  tenure=desP, treatment=ants_gt2d,
+             survNom = n_survived, survDen = med_t5eggs) +
+    xlab("Latest desertion date from plant\nrelative to hatch") +
+    ylab("Survivorship of eggs\n(5th instars/eggs)") + 
+    scale_color_manual(values = c("brown1", "black"), labels = c("ants > 2 days", "ants ≤ 2 days")) +
+    scale_fill_manual(values = c("brown1", "black"), labels = c("ants > 2 days", "ants ≤ 2 days"))
+  
+
+(desP.ants_gt2d.quad.qb.p <- egg::ggarrange(des_hatch.desP.ants_gt2d.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Nsurv.desP.ants_gt2d.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Esurv.desP.ants_gt2d.quad.qb.p+
+                 theme(legend.position=c(0.8,0.95))+ylim(0,1),
+               labels=c("A","B","C"),
+               ncol=3))
+
+ggsave("desP.ants_gt2d.quad.final.png",
+       desP.ants_gt2d.quad.qb.p,
+       device="png", width = 300, height = 110, units = "mm", dpi = "print")
+```
+
+## Tables
+don't need to include the data summary in supp, since the only thing that changes is the median (IQR) for desertion
+```{r}
+(surv_reg_data.tbl_summary.desP.ants_gt2d <- surv_reg_data %>%
+  mutate(ants = ifelse(ants_gt2d==" ants", "ants >2 days", "ants <=2 days"),
+         females = ifelse(females_removed, "Females removed", "Control"),
+         `plant desert date rel. hatch` = desP,
+         `visited early` = vis,
+         `n eggs` = med_t5eggs,
+         `n hatched` = n_hatched,
+         `n survived` = n_survived) %>%
+  select(ants, females, `plant desert date rel. hatch`, `visited early`, 
+         `n eggs`, `n hatched`, `n survived`) %>%
+  group_by(females, ants) %>%
+  tbl_summary(by = ants) %>%
+  bold_labels() %>% italicize_levels() %>%
+  add_n())
+
+surv_reg_data.tbl_summary.desP.ants_gt2d %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv_reg_data.tbl_summary.desP.ants_gt2d.docx")
+```
+
+```{r}
+hatch.desP.ants_gt2d.quad.qb.tbl <- 
+  tbl_regression(des_hatch.desP.ants_gt2d.quad.fits$mai.qb, exponentiate=T,
+                 label=list(desP ~ "Leaf desert date",
+                            `I(as.numeric(desP)^2)` ~ "(Leaf desert date)^2",
+                            ants_gt2d ~ "Ants >2 days")) %>% bold_p()
+Nsurv.desP.ants_gt2d.quad.qb.tbl <- 
+  tbl_regression(des_Nsurv.desP.ants_gt2d.quad.fits$mai.qb, exponentiate=T,
+                 label=list(desP ~ "Leaf desert date",
+                            `I(as.numeric(desP)^2)` ~ "(Leaf desert date)^2",
+                            ants_gt2d ~ "Ants >2 days")) %>% bold_p()
+Esurv.desP.ants_gt2d.quad.qb.tbl <- 
+  tbl_regression(des_Esurv.desP.ants_gt2d.quad.fits$mai.qb, exponentiate=T,
+                 label=list(desP ~ "Leaf desert date",
+                            `I(as.numeric(desP)^2)` ~ "(Leaf desert date)^2",
+                            ants_gt2d ~ "Ants >2 days")) %>% bold_p()
+
+(desP.ants_gt2d.quad.qb.tbl.merge <- 
+  tbl_merge(
+    tbls = list(hatch.desP.ants_gt2d.quad.qb.tbl, 
+                Nsurv.desP.ants_gt2d.quad.qb.tbl, 
+                Esurv.desP.ants_gt2d.quad.qb.tbl),
+    tab_spanner = c("**Hatching success**", 
+                    "**Survivorship of nymphs**", 
+                    "**Survivorship of eggs**")
+  ) %>%
+  modify_header(label = "**Variable**") %>%
+  bold_labels() %>% italicize_levels())
+
+desP.ants_gt2d.quad.qb.tbl.merge %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv.reg_summary.desP.ants_gt2d.quad.docx")
+```
+
+# Supp 3 -`desP * ant_s_gt2_treatment * desP^2`
+## Figures
+```{r}
+# hatching success
+des_hatch.desP.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_hatched, survDen=med_t5eggs,
+                              tenure=desP, treatment=ant_treatment)
+
+des_hatch.desP.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data, 
+              tenure=desP, treatment=ant_treatment,
+              survNom=n_hatched, survDen=med_t5eggs,
+              model = des_hatch.desP.ant_treatment.quad.fits$mai.qb)
+
+des_hatch.desP.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_hatch.desP.ant_treatment.quad.qb.ci, 
+                                  tenure=desP, treatment=ant_treatment,
+             survNom = n_hatched, survDen = med_t5eggs) +
+    xlab("Latest desertion date from plant\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# nymph survivorship
+des_Nsurv.desP.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=n_hatched,
+                              tenure=desP, treatment=ant_treatment)
+
+des_Nsurv.desP.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data, 
+              tenure=desP, treatment=ant_treatment,
+              survNom=n_survived, survDen=n_hatched,
+              model = des_Nsurv.desP.ant_treatment.quad.fits$mai.qb)
+
+des_Nsurv.desP.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_Nsurv.desP.ant_treatment.quad.qb.ci, 
+                                  tenure=desP, treatment=ant_treatment,
+             survNom = n_survived, survDen = n_hatched) +
+    xlab("Latest desertion date from plant\nrelative to hatch") +
+    ylab("Survivorship of nymphs\n(5th instars/nymphs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# egg survivorship
+des_Esurv.desP.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=med_t5eggs,
+                              tenure=desP, treatment=ant_treatment)
+
+des_Esurv.desP.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data, 
+              tenure=desP, treatment=ant_treatment,
+              survNom=n_survived, survDen=med_t5eggs,
+              model = des_Esurv.desP.ant_treatment.quad.fits$mai.qb)
+
+des_Esurv.desP.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_Esurv.desP.ant_treatment.quad.qb.ci, 
+                                  tenure=desP, treatment=ant_treatment,
+             survNom = n_survived, survDen = med_t5eggs) +
+    xlab("Latest desertion date from plant\nrelative to hatch") +
+    ylab("Survivorship of eggs\n(5th instars/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+  
+
+(desP.ant_treatment.quad.qb.p <- egg::ggarrange(des_hatch.desP.ant_treatment.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Nsurv.desP.ant_treatment.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Esurv.desP.ant_treatment.quad.qb.p+
+                 theme(legend.position=c(0.8,0.95))+ylim(0,1),
+               labels=c("A","B","C"),
+               ncol=3))
+
+ggsave("desP.ant_treatment.quad.final.png",
+       desP.ant_treatment.quad.qb.p,
+       device="png", width = 300, height = 110, units = "mm", dpi = "print")
+```
+
+## Tables
+don't need to include the data summary in supp, since the only thing that changes is the median (IQR) for desertion
+```{r}
+(surv_reg_data.tbl_summary.desP.ant_treatment <- surv_reg_data %>%
+  mutate(ants = ifelse(ant_treatment==" ants", "ants >2 days", "ants <=2 days"),
+         females = ifelse(females_removed, "Females removed", "Control"),
+         `plant desert date rel. hatch` = desP,
+         `visited early` = vis,
+         `n eggs` = med_t5eggs,
+         `n hatched` = n_hatched,
+         `n survived` = n_survived) %>%
+  select(ants, females, `plant desert date rel. hatch`, `visited early`, 
+         `n eggs`, `n hatched`, `n survived`) %>%
+  group_by(females, ants) %>%
+  tbl_summary(by = ants) %>%
+  bold_labels() %>% italicize_levels() %>%
+  add_n())
+
+surv_reg_data.tbl_summary.desP.ant_treatment %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv_reg_data.tbl_summary.desP.ant_treatment.docx")
+```
+
+```{r}
+hatch.desP.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_hatch.desP.ant_treatment.quad.fits$mai.qb, exponentiate=T,
+                 label=list(desP ~ "Leaf desert date",
+                            `I(as.numeric(desP)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+Nsurv.desP.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_Nsurv.desP.ant_treatment.quad.fits$mai.qb, exponentiate=T,
+                 label=list(desP ~ "Leaf desert date",
+                            `I(as.numeric(desP)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+Esurv.desP.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_Esurv.desP.ant_treatment.quad.fits$mai.qb, exponentiate=T,
+                 label=list(desP ~ "Leaf desert date",
+                            `I(as.numeric(desP)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+
+(desP.ant_treatment.quad.qb.tbl.merge <- 
+  tbl_merge(
+    tbls = list(hatch.desP.ant_treatment.quad.qb.tbl, 
+                Nsurv.desP.ant_treatment.quad.qb.tbl, 
+                Esurv.desP.ant_treatment.quad.qb.tbl),
+    tab_spanner = c("**Hatching success**", 
+                    "**Survivorship of nymphs**", 
+                    "**Survivorship of eggs**")
+  ) %>%
+  modify_header(label = "**Variable**") %>%
+  bold_labels() %>% italicize_levels())
+
+desP.ant_treatment.quad.qb.tbl.merge %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="surv.reg_summary.desP.ant_treatment.quad.docx")
+```
+
+# qAICc
+```{r}
+# qAICc into separate tables
+# qaicc
+(qAICc_gt_tbl_hatch_quad <- tibble(
+  Model = c("desert leaf + ant treatment + desert leaf*ant treatment + 
+            desert leaf^2 + desert leaf^2*ant treatment",
+            "desert plant + ant treatment + desert plant*ant treatment + 
+            desert plant^2 + desert plant^2*ant treatment",
+            "desert leaf + ants >2days + desert leaf*ants >2days + 
+            desert leaf^2 + desert leaf^2*ants >2days",
+            "desert plant + ants >2days + desert plant*ants >2days + 
+            desert plant^2 + desert plant^2*ants >2days"),
+  Response = c(rep("Hatching success",4)),
+  qAICc = c(
+    get_qaicc(des_hatch.desL.ant_treatment.quad.fits),
+    get_qaicc(des_hatch.desP.ant_treatment.quad.fits),
+    get_qaicc(des_hatch.desL.ants_gt2d.quad.fits),
+    get_qaicc(des_hatch.desP.ants_gt2d.quad.fits))
+  ) %>% 
+  arrange(qAICc) %>%
+  mutate('delta-qAICc' = qAICc - first(qAICc)) %>%
+  gt() %>%
+  fmt_number(columns=c(`qAICc`, `delta-qAICc`), decimals=2))
+
+(qAICc_gt_tbl_Nsurv_quad <- tibble(
+  Model = c("desert leaf + ant treatment + desert leaf*ant treatment + 
+            desert leaf^2 + desert leaf^2*ant treatment",
+            "desert plant + ant treatment + desert plant*ant treatment + 
+            desert plant^2 + desert plant^2*ant treatment",
+            "desert leaf + ants >2days + desert leaf*ants >2days + 
+            desert leaf^2 + desert leaf^2*ants >2days",
+            "desert plant + ants >2days + desert plant*ants >2days + 
+            desert plant^2 + desert plant^2*ants >2days"),
+  Response = c(rep("Nymph survivorship",4)),
+  qAICc = c(
+    get_qaicc(des_Nsurv.desL.ant_treatment.quad.fits),
+    get_qaicc(des_Nsurv.desP.ant_treatment.quad.fits),
+    get_qaicc(des_Nsurv.desL.ants_gt2d.quad.fits),
+    get_qaicc(des_Nsurv.desP.ants_gt2d.quad.fits))
+  ) %>% 
+  arrange(qAICc) %>%
+  mutate('delta-qAICc' = qAICc - first(qAICc)) %>%
+  gt() %>%
+  fmt_number(columns=c(`qAICc`, `delta-qAICc`), decimals=2))
+
+(qAICc_gt_tbl_hatch_quad <- tibble(
+  Model = c("desert leaf + ant treatment + desert leaf*ant treatment + 
+            desert leaf^2 + desert leaf^2*ant treatment",
+            "desert plant + ant treatment + desert plant*ant treatment + 
+            desert plant^2 + desert plant^2*ant treatment",
+            "desert leaf + ants >2days + desert leaf*ants >2days + 
+            desert leaf^2 + desert leaf^2*ants >2days",
+            "desert plant + ants >2days + desert plant*ants >2days + 
+            desert plant^2 + desert plant^2*ants >2days"),
+  Response = c(rep("Egg survivorship",4)),
+  qAICc = c(
+    get_qaicc(des_Esurv.desL.ant_treatment.quad.fits),
+    get_qaicc(des_Esurv.desP.ant_treatment.quad.fits),
+    get_qaicc(des_Esurv.desL.ants_gt2d.quad.fits),
+    get_qaicc(des_Esurv.desP.ants_gt2d.quad.fits))
+  ) %>% 
+  arrange(qAICc) %>%
+  mutate('delta-qAICc' = qAICc - first(qAICc)) %>%
+  gt() %>%
+  fmt_number(columns=c(`qAICc`, `delta-qAICc`), decimals=2))
+```
+
+## Stats interpretation
+```{r}
+# function to get fits and confint
+ci_for_stats <- function(data_in, model){
+  
+  data <- eval(substitute(
+    data_in %>%
+      add_column(fit = predict(model, newdata = ., type = 'response'))
+    ))
+  
+  ## grad the inverse link function
+  ilink <- family(model)$linkinv
+  
+  ## add fit and se.fit on the **link** scale
+  data_fit_link <- eval(substitute(
+    data %>% add_column(
+  setNames(as_tibble(predict(model, data, se.fit = TRUE)[1:2]),
+           c('fit_link','se_link'))) %>%
+## create the interval and backtransform
+  mutate(fit_resp  = ilink(fit_link),
+         conf_upr = ilink(fit_link + (2 * se_link)),
+         conf_lwr = ilink(fit_link - (2 * se_link)))
+    ))
+  
+  return(data_fit_link)
+}
+
+# function to get max fit, plus upper and lower ci
+get_max_fit <- function(data_in, model){
+  
+  max_fit <- eval(substitute(ci_for_stats(data_in=data_in, 
+             model) %>%
+  group_by(ant_treatment) %>%
+  mutate(max = max(fit)) %>% filter(fit==max) %>% 
+    select(ant_treatment, des, max)))
+  
+  max_upr <- eval(substitute(ci_for_stats(data_in=data_in, 
+             model) %>%
+  group_by(ant_treatment) %>%
+  mutate(max_upr = max(conf_upr)) %>% filter(conf_upr==max_upr) %>% 
+    select(ant_treatment, des_upr=des, max_upr)))
+  
+  max_lwr <- eval(substitute(ci_for_stats(data_in=data_in, 
+             model) %>%
+  group_by(ant_treatment) %>%
+  mutate(max_lwr = max(conf_lwr)) %>% filter(conf_lwr==max_lwr) %>% 
+    select(ant_treatment, des_lwr=des, max_lwr)))
+  
+  data_out <- max_fit %>% left_join(max_upr) %>% left_join(max_lwr)
+  return(data_out)
+}
+
+## Hatch
+# at -20,0,10 etc.
+ci_for_stats(data_in=
+               tibble(ant_treatment=c(rep("Control",5), rep("Removed",5)),
+                      des=rep(c(-20,10,0,10,20),2)), 
+             des_hatch.desL.ant_treatment.quad.fits$mai.qb)
+
+# where is the maximum?
+get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",10000)),
+                           des=rep(seq(-20,20,length.out=10000),2)),
+            model=des_hatch.desL.ant_treatment.quad.fits$mai.qb)
+
+# Nsurv
+# at -20,0,10 etc.
+ci_for_stats(data_in=
+               tibble(ant_treatment=c(rep("Control",5), rep("Removed",5)),
+                      des=rep(c(-20,10,0,10,20),2)), 
+             des_Nsurv.desL.ant_treatment.quad.fits$mai.qb)
+
+# where is the maximum?
+get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",10000)),
+                           des=rep(seq(-20,20,length.out=10000),2)),
+            model=des_Nsurv.desL.ant_treatment.quad.fits$mai.qb)
+
+# Esurv
+# at -20,0,10 etc.
+ci_for_stats(data_in=
+               tibble(ant_treatment=c(rep("Control",5), rep("Removed",5)),
+                      des=rep(c(-20,10,0,10,20),2)), 
+             des_Esurv.desL.ant_treatment.quad.fits$mai.qb)
+
+# where is the maximum?
+get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",10000)),
+                           des=rep(seq(-20,20,length.out=10000),2)),
+            model=des_Esurv.desL.ant_treatment.quad.fits$mai.qb)
+```
+
+
+
+# Figures for FPO
+
+## Figures
+### Both colors
+```{r}
+# hatching success
+des_hatch.desL.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_hatched, survDen=med_t5eggs,
+                              tenure=des, treatment=ant_treatment)
+
+des_hatch.desL.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ant_treatment,
+              survNom=n_hatched, survDen=med_t5eggs,
+              model = des_hatch.desL.ant_treatment.quad.fits$mai.qb)
+
+des_hatch.desL.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_hatch.desL.ant_treatment.quad.qb.ci, 
+                                  tenure=des, treatment=ant_treatment,
+             survNom = n_hatched, survDen = med_t5eggs) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+# nymph survivorship
+des_Nsurv.desL.ant_treatment.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=n_hatched,
+                              tenure=des, treatment=ant_treatment)
+
+des_Nsurv.desL.ant_treatment.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ant_treatment,
+              survNom=n_survived, survDen=n_hatched,
+              model = des_Nsurv.desL.ant_treatment.quad.fits$mai.qb)
+
+des_Nsurv.desL.ant_treatment.quad.qb.p <- plot_ci(ci_data=des_Nsurv.desL.ant_treatment.quad.qb.ci, 
+                                  tenure=des, treatment=ant_treatment,
+             survNom = n_survived, survDen = n_hatched) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Survivorship of nymphs\n(5th instars/nymphs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+(FPO_desL.ant_treatment_allCols <- egg::ggarrange(des_hatch.desL.ant_treatment.quad.qb.p+
+                 theme(legend.position="none"),
+               des_Nsurv.desL.ant_treatment.quad.qb.p+
+                 theme(legend.position="none")))
+
+ggsave("FPO_desL.ant_treatment_allCols.png",
+       FPO_desL.ant_treatment_allCols,
+       device="png", width = 150, height = 200, units = "mm", dpi = "print")
+```
+
+### Black only
+```{r}
+# hatching success
+des_hatch.desL.ant_treatment.quad.qb.p_blackOnly <- 
+  ggplot(data = filter(des_hatch.desL.ant_treatment.quad.qb.ci,
+                       ant_treatment=="Removed"), 
+       aes(x = des, y = fit), 
+           color = "black", fill = "black") +
+    theme_publilia() +
+    geom_point(aes(y = n_hatched/med_t5eggs), alpha = 0.25, size = 4, shape=16, key_glyph=draw_key_rect) + 
+    geom_line(aes(y = fit), size = 1, key_glyph=draw_key_rect) +
+    geom_ribbon(aes(ymin = conf_upr, ymax = conf_lwr),
+                    alpha = 0.5, color = NA, key_glyph=draw_key_rect) +
+      xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)")
+
+
+# nymph survivorship
+des_Nsurv.desL.ant_treatment.quad.qb.p_blackOnly <- 
+  ggplot(data = filter(des_Nsurv.desL.ant_treatment.quad.qb.ci,
+                       ant_treatment=="Removed"), 
+       aes(x = des, y = fit), 
+           color = "black", fill = "black") +
+    theme_publilia() +
+    geom_point(aes(y = n_survived/n_hatched), alpha = 0.25, size = 4, shape=16, key_glyph=draw_key_rect) + 
+    geom_line(aes(y = fit), size = 1, key_glyph=draw_key_rect) +
+    geom_ribbon(aes(ymin = conf_upr, ymax = conf_lwr),
+                    alpha = 0.5, color = NA, key_glyph=draw_key_rect) +
+  xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Survivorship of nymphs\n(5th instars/nymphs)")
+
+(FPO_desL.ant_treatment_blackOnly <- egg::ggarrange(des_hatch.desL.ant_treatment.quad.qb.p_blackOnly+
+                 theme(legend.position="none"),
+               des_Nsurv.desL.ant_treatment.quad.qb.p_blackOnly+
+                 theme(legend.position="none")))
+
+ggsave("FPO_desL.ant_treatment_blackOnly.png",
+       FPO_desL.ant_treatment_blackOnly,
+       device="png", width = 150, height = 200, units = "mm", dpi = "print")
+```
+
+hatching success
+```{r}
+# hatching success
+des_hatch.desL.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_hatched, survDen=med_t5eggs,
+                              tenure=des, treatment=ants_gt2d)
+
+des_hatch.desL.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ants_gt2d,
+              survNom=n_hatched, survDen=med_t5eggs,
+              model = des_hatch.desL.ants_gt2d.quad.fits$mai.qb)
+
+des_hatch.desL.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_hatch.desL.ants_gt2d.quad.qb.ci, 
+                                  tenure=des, treatment=ants_gt2d,
+             survNom = n_hatched, survDen = med_t5eggs) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+plot_ci(ci_data=filter(des_hatch.desL.ants_gt2d.quad.qb.ci, 
+                       ants_gt2d ), 
+                                  tenure=des, treatment=ants_gt2d,
+             survNom = n_hatched, survDen = med_t5eggs) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Hatching success\n(nymphs/eggs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+
+```
+
+nymph survivorship
+```{r}
+# nymph survivorship
+des_Nsurv.desL.ants_gt2d.quad.fits <- fit_surv_quad(data_in=surv_reg_data, 
+                              survNom=n_survived, survDen=n_hatched,
+                              tenure=des, treatment=ants_gt2d)
+
+des_Nsurv.desL.ants_gt2d.quad.qb.ci <- 
+  ci_for_plot(data_in=surv_reg_data_LastDesPlant, 
+              tenure=des, treatment=ants_gt2d,
+              survNom=n_survived, survDen=n_hatched,
+              model = des_Nsurv.desL.ants_gt2d.quad.fits$mai.qb)
+
+des_Nsurv.desL.ants_gt2d.quad.qb.p <- plot_ci(ci_data=des_Nsurv.desL.ants_gt2d.quad.qb.ci, 
+                                  tenure=des, treatment=ants_gt2d,
+             survNom = n_survived, survDen = n_hatched) +
+    xlab("Latest desertion date from leaf\nrelative to hatch") +
+    ylab("Survivorship of nymphs\n(5th instars/nymphs)") + 
+    scale_color_manual(values = c("brown1", "black")) +
+    scale_fill_manual(values = c("brown1", "black"))
+```
