@@ -619,7 +619,7 @@ nymph_text_conflict_data <- All_data_v4 %>% # nymph_text_conflict: 10 on 2019/09
     filter(any(c(N1_text_conflict, N2_text_conflict, N5_text_conflict))) %>%
   ungroup() %>%
   select(Date, Dorm, Plant, Leaf, Female_ID, Eggs, N1, N2, N5, nymph_origin, Notes, N1_text_conflict, N2_text_conflict, N5_text_conflict)
-# write_csv(egg_text_conflict_data, "egg_text_conflict_data.csv")
+# write_csv(egg_text_conflict_data, here("data/manual_check/egg_text_conflict_data.csv"))
 
 nymph_status_missing_data <- All_data_v4 %>% # nymph_status_missing: 17 on 2019/09/24; 5 on 2019/09/26 (all ok to ignore)
   left_join(N1_status, by = c("Date", "location", "N1")) %>%
@@ -629,7 +629,7 @@ nymph_status_missing_data <- All_data_v4 %>% # nymph_status_missing: 17 on 2019/
   filter(any(c(N1_status_missing, N2_status_missing, N5_status_missing))) %>%
   ungroup() %>%
   select(Date, Dorm, Plant, Leaf, Female_ID, Eggs, N1, N2, N5, nymph_origin, Notes, N1_status_missing, N2_status_missing, N5_status_missing)
-# write_csv(egg_status_missing_data, "egg_status_missing_data.csv")
+# write_csv(egg_status_missing_data, here("data/manual_check/egg_status_missing_data.csv")
 
 print("checking number of ambiguous nymph entries that need to be resolved:")
 print(paste("nymph_text_conflict_data: ", nrow(nymph_text_conflict_data)))
@@ -671,7 +671,7 @@ Again these changes were specified in the `check_hatch_date` sheet and are appli
 check_hatch_date <- All_data_v4  %>%
   filter(grepl("not", Notes, ignore.case = TRUE), grepl("hatch", Notes, ignore.case = TRUE)) %>%
   distinct(location)
-# write_csv(check_hatch_date, "check_hatch_date_tmp.csv")
+# write_csv(check_hatch_date, here("data/manual_check/check_hatch_date_tmp.csv")
 ```
 
 ### Revise initiation dates and hatch dates (v2) based on `check_hatch_date` manual check
@@ -923,7 +923,7 @@ leaf_ants_flagged_v2 <- text_conflict_check(All_data_v5_plant_leaf_ants_v2,
 ant_text_conflict_v2 <- filter(plant_ants_flagged_v2, plant_ants_text_conflict) %>%
   bind_rows(filter(leaf_ants_flagged_v2, leaf_ants_text_conflict))
   
-# write_csv(ant_text_conflict, "ant_text_conflict.csv") # resolved 2019-10-08
+# write_csv(ant_text_conflict, here("data/manual_check/ant_text_conflict.csv") # resolved 2019-10-08
 ```
 
 ## 3.3 - Split ant species into separate columns, check and revise ant counts per species and total
@@ -1169,15 +1169,15 @@ ggplot(data = clutch_status_init_hatch_v1, aes(x = egg_len, y = egg_num)) +
 short_unhatched_days_check <- clutch_status_stats_v1 %>% 
   filter(unhatched_days <= 16)
 
-# write_csv(short_unhatched_days_check, "short_unhatched_days_check_tmp.csv")
+# write_csv(short_unhatched_days_check, here("data/manual_check/short_unhatched_days_check_tmp.csv")
 
 # *** when is this used for revisions, if ever?
 never_hatched_check <- clutch_status_stats_v1 %>% 
   filter(is.na(hatch_date))
 
-# write_csv(never_hatched_check, "never_hatched_check_tmp.csv")
+# write_csv(never_hatched_check, here("data/manual_check/never_hatched_check_tmp.csv")
 
-# write_csv(clutch_status_stats_v1, "egg_measures_check_tmp.csv")
+# write_csv(clutch_status_stats_v1, here("data/manual_check/egg_measures_check_tmp.csv")
 ```
 
 # 5 - Creating a table with relative guarding times
@@ -1464,7 +1464,7 @@ NOr_manual_check_table <- NOr_status_resolveable_mult_clutches %>%
   arrange(Dorm, as.numeric(Plant), as.numeric(Leaf), Date)
 # 83 clutches on 34 plants to check
 
-# write_csv(NOr_manual_check_table %>% filter(revise_NOr == "MANUAL CHECK"), "NOr_manual_check_tmp.csv")
+# write_csv(NOr_manual_check_table %>% filter(revise_NOr == "MANUAL CHECK"), here("data/manual_check/NOr_manual_check_tmp.csv")
 
 NOr_manual_revisions <- read_xlsx(in_filename, sheet = "NOr_manual_check", col_types = c("date", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "text", "logical", "text")) %>%
   mutate(Date = as_date(Date),
