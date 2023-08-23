@@ -1365,17 +1365,6 @@ clutch_status_guarding_summary_v2 <- clutch_durations_summary_v2 %>%
   select(-hatch_date_check, -short_unhatched_check)
 ```
 
-# 6 - Write data for `Publilia-02-strats.Rmd` to `.rds` for further analysis in clean environment
-
-## `Publilia-02-strats.Rmd`
-```{r}
-write_rds(All_data_v6, here("saved_rds/All_data_v6.rds"))
-write_rds(clutch_status_guarding_summary_v2, here("saved_rds/clutch_status_guarding_summary_v2.rds"))
-write_rds(last_day_fID, here("saved_rds/last_day_fID.rds"))
-```
-
-
-
 ***
 
 *Prep data for `Publilia-03-survivorship.Rmd`:*
@@ -1813,9 +1802,7 @@ theme_publilia <- function(){
 ## 9.0 - Get visited_1st_4d_data
 
 ```{r}
-strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
-
-visited_1st_4d_data <- strats_data %>%
+visited_1st_4d_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID) %>%
   group_by(location) %>%
     mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
   ungroup() %>%
@@ -1887,7 +1874,7 @@ ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_afh, fill=ant_treatment)) +
 
 ```
 
-# 9.2 - Threshold for number of days ants were on the plant
+## 9.2 - Threshold for number of days ants were on the plant
 Should I be more lenient with my threshold, so I can have more even sample sizes between "ants" and "no ants"?
 - ants_ever = n_days_ants>0: F = 83, T = 143
 - antsP_gt2d = n_days_ants>2: F = 123, T = 103 * most even sample size
@@ -1924,6 +1911,85 @@ ant_n_days %>%
 ant_n_days %>%
   count(females_removed, antsP_gt3d)
 ```
+
+## 9.3 - Ant arrival times
+
+```{r}
+antP_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsP_afh=ants_P&afh) %>%
+    filter(is_antsP_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antP_arrival_afh=Date-est_hatch) %>%
+  select(location, antP_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antP_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsP_bfh=ants_P&b4h) %>%
+    filter(is_antsP_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antP_last_b4h=Date-est_hatch) %>%
+  select(location, antP_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsL_afh=ants_L&afh) %>%
+    filter(is_antsL_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antL_arrival_afh=Date-est_hatch) %>%
+  select(location, antL_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsL_bfh=ants_L&b4h) %>%
+    filter(is_antsL_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antL_last_b4h=Date-est_hatch) %>%
+  select(location, antL_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+ant_data <- ant_counts %>%
+  left_join(antP_last_b4h_data) %>%
+  left_join(antP_arrival_afh_data) %>%
+  left_join(antL_last_b4h_data) %>%
+  left_join(antL_arrival_afh_data)
+```
+
 
 # 10 - Estimate clutch size more robust to outliers: median top 5 egg counts
 
@@ -2150,6 +2216,44 @@ clutch_survivorship_data <- clutch_egg_num_data %>%
             by=c("location"="NOr_rev_loc"))
 ```
 
+# 6 - Write data for `Publilia-02-strats.Rmd` to `.rds` for further analysis in clean environment
+
+## `Publilia-02-strats.Rmd`
+```{r}
+strats_data <- visited_1st_4d_data_tb  %>%
+  # Add ant arrival data
+  left_join(ant_data) %>%
+  # Add day of first visit bins
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
+         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
+                                              "5+","never visited"))) %>%
+  # Accommodate different tie-breaking procedures (wrt choosing a single female as initiator if multiple present at hatch)
+  # 1) Longest initiator
+  mutate(initL = init_first_dur_rank == 1) %>% 
+  # 2) Shortest initiator
+  #  i) break ties by picking marked females over unmarked
+  group_by(location, init_first_dur_shortest) %>% 
+    mutate(initS_tmp = ifelse(n()>1, !grepl("Uf", Female_ID), TRUE)) %>% 
+  ungroup() %>%
+  #  ii) finally picking at random (only one case, identical predictor vars)
+  group_by(location, init_first_dur_shortest, initS_tmp) %>%
+    mutate(initS = init_first_dur_shortest & initS_tmp & row_number()==1) %>%
+  ungroup()
+  
+```
+
+## `Publilia-02-strats.Rmd`
+```{r}
+write_rds(All_data_v6, here("saved_rds/All_data_v6.rds"))
+# write_rds(clutch_status_guarding_summary_v2, here("saved_rds/clutch_status_guarding_summary_v2.rds"))
+# write_rds(last_day_fID, here("saved_rds/last_day_fID.rds"))
+write_rds(strats_data, here("saved_rds/strats_data.rds"))
+```
 
 # 12 - Write data for `Publilia-03-survivorship.Rmd` to `.rds` for further analysis in clean environment
 
@@ -2176,6 +2280,8 @@ surv_reg_data <- clutch_survivorship_data %>%
   mutate(last_desP_rel2h = last_visit_ends_P-est_hatch,
          desP = last_desP_rel2h) 
 ```
+
+
 
 ## `Publilia-03-survivorship.Rmd`
 ```{r}

@@ -8,45 +8,50 @@ output:
 toc_depth: 3
 ---
 
+```{=html}
+<style type="text/css">
+  .book .book-body .page-inner {
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+details > summary {
+  display: list-item;
+}
+</style>
+```
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 8, fig.height = 6) 
+
+library(kableExtra)   ## Needed if rendering tables
+```
+
+
 # 0 - Data import
+
+```{r}
+library(here)
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(stringr)
+
+theme_set(theme_bw())
+```
 
 clutch_status_guarding_summary_v2
 ```{r}
 All_data_v6 <- read_rds(here("saved_rds/All_data_v6.rds"))
-clutch_status_guarding_summary_v2 <- read_rds(here("saved_rds/clutch_status_guarding_summary_v2.rds"))
-last_day_fID <- read_rds(here("saved_rds/last_day_fID.rds"))
-
-strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
+strats_data <- read_rds(here("saved_rds/strats_data.rds"))
 ```
 
 # 1 - Mothers dynamically adjust care depending on the presence of ants and conspecific females
 
 *First, we build logical columns for each of the desired filters for different text sections and figures. This way we can keep the total universe of data in one place and ensure that we are certain which data are being left out and why.*
 ```{r}
-strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
-
 strats_data_with_filters <- strats_data %>%
-  # Add whether female was visited within first 4 days of initiating
-  group_by(location) %>%
-    mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
-  ungroup() %>%
-  # Add some additional metrics for human readability
-  mutate(`visited in 4 days` = ifelse(visited_1st_4d | num_at_init>1,
-                                      "Visited", "Not visited"),
-         ants = ifelse(ants_removed, "Ants removed", "Control"),
-         est_hatch = as_date(ifelse(is.na(hatch_date),
-                                 initiation_date + 20,
-                                 hatch_date)),
-         est_rel2h = visit_ends-est_hatch) %>%
-  # Add day of first visit bins
-  left_join(first_visit_cuts) %>%
-  mutate(vis_cat = ifelse(num_at_init > 1,
-                          "0",
-                          ifelse(is.na(first_visit_starts),
-                                 "never visited",
-                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
-         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
-                                              "5+","never visited"))) %>%
   # Remove one female who has dubious data (See note ** below)
   #filter(!is.na(vis_cat)) %>%
   # Build logicals representing inclusion in different plots
@@ -163,7 +168,7 @@ Most females laid their first eggs by initiating their own clutch while some fem
 
 Visits by secondary females were typically short (median = X days) and only 2 visitors remained through hatching (Figure 2B). 
 ```{r}
-visited_1st_4d_data_tb %>%
+strats_data_with_filters %>%
   filter(!females_removed,
          !mom_at_init,
          visit_ends < last_day_fID) %>%
@@ -171,6 +176,15 @@ visited_1st_4d_data_tb %>%
             n_NA = sum(is.na(guard_duration)),
             mean_gd = mean(as.numeric(guard_duration, "days"), na.rm=T),
             med_gd = median(as.numeric(guard_duration, "days"), na.rm=T))
+
+# visited_1st_4d_data_tb %>%
+#   filter(!females_removed,
+#          !mom_at_init,
+#          visit_ends < last_day_fID) %>%
+#   summarize(n = n(),
+#             n_NA = sum(is.na(guard_duration)),
+#             mean_gd = mean(as.numeric(guard_duration, "days"), na.rm=T),
+#             med_gd = median(as.numeric(guard_duration, "days"), na.rm=T))
 ```
 
 ## Figure 3
