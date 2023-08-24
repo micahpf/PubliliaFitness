@@ -1,0 +1,1966 @@
+---
+title: "Publilia_2019_CHAPTER-1-strategies"
+author: "micah fletcher"
+date: "1/18/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Publilia 2019 Chapter - Script 1: guarding strategies
+This is meant to consolidate previous scripts and provide a readable and reproducible record of the analyses for the Publilia Chapter.
+
+(See `Publilia_2019_CHAPTER-0-prep.Rmd` for the full outline of the chapter)
+1) *Guarding strategies:* Three distinct strategies for maternal care emerge from ant-dependent and secondary visitor-dependent plasticity
+  - *Dataset A* requirements:
+    - Guarding durations (relative to [estimated] hatching) are accurate.
+      - The sample of clutches is representative of the full factorial of ants / no ants and visited early / not visited early
+    - Able to compare 
+      - initiated vs. visited
+      - first vs. later [initiated] clutches
+        -however, if plotting "all clutches" I can include unmarked females
+      - disappeared vs. deserted (based on last day a female was observed)
+    - Deciding on who is the "true" initiator is necessary for assumptions of independence for statistics. 
+      - Ultimately, comparing the two most obvious options (first and longest guarding mom at initiation, vs first and shortest guarding mom at initiation) will need to suffice.
+Missing data is clearly represented; Compare the "original" unfiltered data to the final data and report why (and how many) data were excluded.
+
+## Required libraries and functions
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(emmeans)
+library(effectsize)
+
+library(gt)
+library(gtsummary)
+library(flextable)
+theme_gtsummary_compact()
+
+library(multcompView)
+
+theme_publilia <- function(){
+  theme_bw() +
+    theme(text = element_text(family = "Arial"),
+          axis.text = element_text(size = 12), 
+          axis.title = element_text(size = 14),
+          axis.line.x = element_line(color="black"), 
+          axis.line.y = element_line(color="black"),
+          panel.border = element_blank(),
+          panel.grid.major.x = element_blank(),                                          
+          panel.grid.minor.x = element_blank(),
+          panel.grid.minor.y = element_blank(),
+          panel.grid.major.y = element_blank(),  
+          plot.margin = unit(c(0.5, 0.5, 0.5, 0.5), units = , "cm"),
+          plot.title = element_text(size = 18, vjust = 1, hjust = 0.5, face = "bold"),
+          legend.text = element_text(size = 10),          
+          legend.title = element_blank(),                              
+          # legend.position = c(0.90, 0.90), 
+          legend.key = element_blank(),
+          legend.background = element_rect(color = "black", 
+                                           fill = "transparent", 
+                                           size = 2, linetype = "blank"))
+}
+```
+
+# 0 - Data import
+clutch_status_guarding_summary_v2
+```{r}
+setwd("/Users/micah/Documents/Princeton/Kocher_Lab/Publilia/PubliliaBehavEcol/Watershed_2019/Watershed_2019_analysis/CHAPTER")
+
+# clutch_status_guarding_summary_v2 <- read_csv("../Publilia_2019_ABS_talk_analysis_data/clutch_status_guarding_summary_v2")
+# last_day_fID <- read_csv("../Publilia_2019_ABS_talk_analysis_data/last_day_fID")
+
+strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
+```
+
+# 1 - Summary stats
+
+We were able to track the behavior of # females over the course of the season. 
+```{r}
+paste(nrow(strats_data %>% distinct(Female_ID)),
+      "Females were successfully identified in the 8 enclosures,")
+
+paste("We were able to mark and recover", nrow(strats_data %>% distinct(Female_ID) %>%
+             filter(!grepl("U", Female_ID))),
+      "females in the 8 enclosures,")
+
+paste("and an additional", nrow(strats_data %>% distinct(Female_ID) %>%
+             filter(grepl("U", Female_ID))),
+      "events where unmarked females (which we were unable to mark in situ) either initiated or visited a clutch.")
+
+paste("We observed a total of", nrow(strats_data),
+      "clutch visit events,")
+
+paste("on a total of", nrow(strats_data %>% distinct(location)),
+      "clutches.")
+
+paste(nrow(strats_data %>% filter(mom_at_init)),
+      "of which were ")
+
+paste(nrow(strats_data),
+      "Clutch-female pairs were successfully identified in the 8 enclosures,")
+
+paste(nrow(filter(strats_data,
+           !grepl("U", Female_ID))),
+      "of which were of marked females, who were followed through time.")
+
+
+paste("To explore the behavioral strategies of freely moving females we restricted our analysis to the",
+      nrow(filter(strats_data,
+           !females_removed)),
+      "clutch visit events on",
+      nrow(filter(strats_data,
+           !females_removed) %>% distinct(location)),
+      "unique clutches in the four enclosures where we did not remove females experimentally.")
+
+paste("We observed",
+      nrow(filter(strats_data,
+           !grepl("U", Female_ID),
+           !females_removed,
+           mom_at_init,
+           clutch_initiated_order == 1)),
+      "of these females initiating their first clutch.")
+
+
+
+paste(nrow(filter(strats_data,
+           !grepl("U", Female_ID),
+           !females_removed,
+           !mom_at_init)),
+      "of these observations were of females visiting an existing clutch, while",
+      nrow(filter(strats_data,
+           !grepl("U", Female_ID),
+           !females_removed,
+           mom_at_init)),
+      "were of females that were present on the leaf when eggs were first observed.")
+
+paste("We observed",
+      nrow(filter(strats_data,
+           !grepl("U", Female_ID),
+           !females_removed,
+           mom_at_init,
+           clutch_initiated_order == 1)),
+      "of these females initiating their first clutch.")
+
+paste(nrow(filter(strats_data,
+                  !grepl("U", Female_ID),
+                  !females_removed,
+                  mom_at_init,
+                  clutch_initiated_order == 1,
+                  visit_ends == last_day_fID)),
+      "females were not observed again after leaving their first clutch, and so were excluded from the analysis because we could not rule out depredation or emigration from the study area.",
+      "That leaves", nrow(filter(strats_data,
+           !grepl("U", Female_ID),
+           !females_removed,
+           mom_at_init,
+           clutch_initiated_order == 1,
+           visit_ends < last_day_fID)),
+      "females on their first clutches used in this analysis.")
+
+## ****does this change anything?*****
+paste("Including these missing females in the analysis reveals...")
+
+```
+
+# 2 - Histograms and related stats
+First I need to know when females were visited on their first clutch.
+I also need to estimate the hatch date for clutches that never hatched so I can still show and run stats for relative desertion date. I do this by adding 20 days to the initiation date. The mean interval from initiation to hatch is 20 days.
+```{r}
+visited_1st_4d_data <- strats_data %>%
+  group_by(location) %>%
+    mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
+  ungroup() %>%
+  mutate(`visited in 4 days` = ifelse(visited_1st_4d | num_at_init>1,
+                                      "Visited", "Not visited"),
+         ants = ifelse(ants_removed, "Ants removed", "Control"),
+         est_hatch = as_date(ifelse(is.na(hatch_date),
+                                 initiation_date + 20,
+                                 hatch_date)),
+         est_rel2h = visit_ends-est_hatch)
+
+strats_data %>%
+  summarize(mean_interval = mean(hatch_date-initiation_date, na.rm=T))
+```
+
+I also need to know how to pick just one initiator when two (or more) females are present on a clutch on the first day eggs are observed.
+```{r}
+visited_1st_4d_data_tb <- visited_1st_4d_data %>%
+  # 1) Longest initiator
+  mutate(initL = init_first_dur_rank == 1) %>% 
+  # 2) Shortest initiator
+  #  i) break ties by picking marked females over unmarked
+  group_by(location, init_first_dur_shortest) %>% 
+    mutate(initS_tmp = ifelse(n()>1, !grepl("Uf", Female_ID), TRUE)) %>% 
+  ungroup() %>%
+  #  ii) finally picking at random (only one case, identical predictor vars)
+  group_by(location, init_first_dur_shortest, initS_tmp) %>%
+    mutate(initS = init_first_dur_shortest & initS_tmp & row_number()==1) %>%
+  ungroup()
+```
+
+# Ant counts on plant; some ants_removed clutches were visited by ants, and vice versa
+```{r}
+ant_counts <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch) %>%
+    summarize(ants_removed=first(ants_removed),
+              females_removed=first(females_removed),
+              n_antsP=sum(ants_P,na.rm=T),
+              ever_antsP=n_antsP>0,
+              mean_antsP=mean(ants_P,na.rm=T),
+              med_antsP=median(ants_P,na.rm=T),
+              
+              n_antsP_b4h=sum(ants_P&b4h),
+              ever_antsP_b4h=n_antsP_b4h>0,
+              mean_antsP_b4h=mean(ifelse(b4h,ants_P,NA),na.rm=T),
+              med_antsP_b4h=median(ifelse(b4h,ants_P,NA),na.rm=T),
+              
+              n_antsP_afh=sum(ants_P&afh),
+              ever_antsP_afh=n_antsP_afh>0,
+              mean_antsP_afh=mean(ifelse(afh,ants_P,NA),na.rm=T),
+              med_antsP_afh=median(ifelse(afh,ants_P,NA),na.rm=T)) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+ggplot(data=ant_counts,aes(x=Dorm,y=n_antsP, fill=ants_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP, fill=ants_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_b4h, fill=ants_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_afh, fill=ants_treatment)) +
+  geom_boxplot()
+
+ant_counts %>%
+  count(Dorm,ants_treatment,ever_antsP)
+
+ant_counts %>%
+  count(Dorm,ants_treatment,ever_antsP_b4h)
+
+ant_counts %>%
+  count(Dorm,ants_treatment,ever_antsP_afh)
+
+# how many clutches ever had ants in each of the dorms?
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP), x=Dorm, fill=ants_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP_b4h), x=Dorm, fill=ants_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP_afh), x=Dorm, fill=ants_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+# how extreme was the break-through?
+ant_counts %>%
+  ggplot(data=., aes(x=mean_antsP_b4h, color=ants_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly(bins=100)
+
+ant_counts %>%
+  ggplot(data=., aes(x=med_antsP_b4h, color=ants_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly()
+
+ant_counts %>%
+  ggplot(data=., aes(x=mean_antsP_afh, color=ants_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly(bins=100)
+
+ant_counts %>%
+  ggplot(data=., aes(x=med_antsP_afh, color=ants_treatment, linetype=females_removed, group=Dorm)) +
+  geom_freqpoly()
+
+# how many clutches actually ever had ants vs. not?
+ant_counts %>%
+  ggplot(data=., aes(x=ever_antsP_b4h, fill=ants_treatment)) +
+  geom_bar() +
+  theme_publilia() + facet_wrap(~females_removed)
+
+ant_counts %>%
+  ggplot(data=., aes(x=ever_antsP_afh, fill=ants_treatment)) +
+  geom_bar() +
+  theme_publilia() + facet_wrap(~females_removed)
+
+ant_counts %>%
+  ggplot(data=., aes(x=ever_antsP_b4h|ever_antsP_afh, fill=ants_treatment)) +
+  geom_bar() +
+  theme_publilia() + facet_wrap(~females_removed)
+
+```
+
+ant arrival times
+```{r}
+antP_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsP_afh=ants_P&afh) %>%
+    filter(is_antsP_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antP_arrival_afh=Date-est_hatch) %>%
+  select(location, antP_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antP_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsP_bfh=ants_P&b4h) %>%
+    filter(is_antsP_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antP_last_b4h=Date-est_hatch) %>%
+  select(location, antP_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsL_afh=ants_L&afh) %>%
+    filter(is_antsL_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antL_arrival_afh=Date-est_hatch) %>%
+  select(location, antL_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsL_bfh=ants_L&b4h) %>%
+    filter(is_antsL_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antL_last_b4h=Date-est_hatch) %>%
+  select(location, antL_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+ant_data <- ant_counts %>%
+  left_join(antP_last_b4h_data) %>%
+  left_join(antP_arrival_afh_data) %>%
+  left_join(antL_last_b4h_data) %>%
+  left_join(antL_arrival_afh_data)
+
+visited_1st_4d_data_ants <- visited_1st_4d_data %>%
+  left_join(ant_data)
+
+visited_1st_4d_data_ants %>%
+  filter(ever_antsP) %>%
+  ggplot(data=., aes(x=est_rel2h, y=antL_last_b4h, color=females_removed)) +
+  geom_point() +
+  geom_abline(slope=1)
+
+visited_1st_4d_data_ants %>%
+  filter(ever_antsP) %>%
+  ggplot(data=., aes(x=est_rel2h, y=antL_arrival_afh, color=females_removed)) +
+  geom_point() +
+  geom_smooth(method=lm) +
+  geom_abline(slope=1)
+
+visited_1st_4d_data_ants %>%
+  filter(ever_antsP) %>%
+  ggplot(data=., aes(x=est_rel2h>=0, y=antL_last_b4h)) +
+  geom_boxplot()
+
+visited_1st_4d_data_ants %>%
+  filter(ants=="Control") %>%
+  ggplot(data=., aes(x=est_rel2h>=0, y=antL_arrival_afh)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=1, width=0.35, height=0) +
+  stat_summary(fun=mean, geom="point", shape=4, size=3)
+
+visited_1st_4d_data_ants %>%
+  filter(ants=="Control", !females_removed) %>%
+  ggplot(data=., aes(x=est_rel2h>=0, y=antL_arrival_afh)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=1, width=0.35, height=0) +
+  stat_summary(fun=mean, geom="point", shape=4, size=3)
+
+
+```
+
+```{r}
+## Not visited early
+# ever ants b4h
+ggplot(data = filter(visited_1st_4d_data_ants, 
+                                 `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends<last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color = ever_antsP_b4h, fill = ever_antsP_b4h), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+# ever ants afh
+ggplot(data = filter(visited_1st_4d_data_ants, 
+                                 `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color=ever_antsP_afh, fill=ever_antsP_afh), 
+            alpha = 0.75, stat='bin', binwidth=4, size=0, position="identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+## Visited early
+# ever ants b4h
+ggplot(data = filter(visited_1st_4d_data_ants,
+                     `visited in 4 days` == "Visited",
+                     !grepl("U", Female_ID), !females_removed, mom_at_init,
+                     clutch_initiated_order == 1, visit_ends<last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color = ever_antsP_b4h, fill = ever_antsP_b4h), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+# ever ants afh
+ggplot(data = filter(visited_1st_4d_data_ants,
+                     `visited in 4 days` == "Visited",
+                     !grepl("U", Female_ID), !females_removed, mom_at_init,
+                     clutch_initiated_order == 1, visit_ends < last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color=ever_antsP_afh, fill=ever_antsP_afh), 
+            alpha = 0.75, stat='bin', binwidth=4, size=0, position="identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+```
+
+
+## Figure 1:
+Using geom_area and density
+```{r}
+Fig1_v1_data <- visited_1st_4d_data %>%
+  filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
+         clutch_initiated_order == 1, visit_ends < last_day_fID)
+
+strat_data_table1 <- visited_1st_4d_data %>%
+  mutate(`Ant exclusion` = ifelse(ants_removed, "Ants excluded", "Control"),
+         `Females not removed (A)` = !females_removed,
+         `Leaf hosted a clutch (B)` = !is.na(initiation_date),
+         `Neither (!A&!B)` = `Females not removed (A)`&`Leaf hosted a clutch (B)`) %>%
+  select(`Ant exclusion`, `Females not removed (A)`, `Leaf hosted a clutch (B)`,
+         `Neither (!A&!B)`) %>%
+  tbl_summary(by=`Ant exclusion`)
+
+strat_data_table1 %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="strat_data_table1.docx")
+
+strat_data_table2 <- visited_1st_4d_data %>%
+  filter(!is.na(initiation_date), !females_removed) %>%
+  mutate(`Ant exclusion` = ifelse(ants_removed, "Ants excluded", "Control"),
+         `Mother at initiation (A)` = !is.na(clutch_initiated_order),
+         `First clutch initiated (B)`=clutch_initiated_order==1,
+         `Didn't disappear (C)`=visit_ends<last_day_fID,
+         `Marked (D)`=!grepl("U", Female_ID),
+         `Visited early (E)`=visited_1st_4d,
+         `Figure 3A (A&B&C&D&!E)`=`Mother at initiation (A)`&`First clutch initiated (B)`&
+           `Didn't disappear (C)`&`Marked (D)`&!`Visited early (E)`,
+         `Figure 3B (A&B&C&D&E)`=`Mother at initiation (A)`&`First clutch initiated (B)`&
+           `Didn't disappear (C)`&`Marked (D)`&`Visited early (E)`,
+         `Figure S4C (!A&C)` = !`Mother at initiation (A)`&`Didn't disappear (C)`) %>%
+  select(`Ant exclusion`, `Mother at initiation (A)`, `First clutch initiated (B)`,
+         `Didn't disappear (C)`, `Marked (D)`,`Visited early (E)`, 
+         `Figure 3A (A&B&C&D&!E)`, `Figure 3B (A&B&C&D&E)`, `Figure S4C (!A&C)`) %>%
+  tbl_summary(by=`Ant exclusion`, missing="no")
+
+strat_data_table2 %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path="strat_data_table2.docx")
+  
+
+Fig1_v1A <- ggplot(data = filter(Fig1_v1_data, `visited in 4 days` == "Not visited")) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+Fig1_v1B <- ggplot(data = filter(Fig1_v1_data, `visited in 4 days` == "Visited")) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+(Fig1_v1AB <- ggpubr::ggarrange(Fig1_v1A +
+            theme(legend.justification = c(1,1),
+                  legend.position = "none") +
+            xlim(-30,34),
+         Fig1_v1B + 
+           theme(legend.justification = c(1,1),
+                 legend.position = c(0.95,0.95)) +
+            xlim(-30,34),
+         align = "v",
+         labels = c("A", "B"),
+         ncol = 1, nrow = 2))
+```
+
+Guarding duration instead of relative guarding duration
+```{r}
+Fig1_v1A.gd <- ggplot(data = filter(Fig1_v1_data, `visited in 4 days` == "Not visited")) +
+  geom_area(aes(x = guard_duration, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Guarding duration") +
+  ylab("Proportion\nof initiating females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = 20, linetype="dashed", 
+                color = "gray", size=1)
+
+Fig1_v1B.gd <- ggplot(data = filter(Fig1_v1_data, `visited in 4 days` == "Visited")) +
+  geom_area(aes(x = guard_duration, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Guarding duration") +
+  ylab("Proportion\nof initiating females") +
+  scale_color_manual(values = c("black", "brown1")) +
+  scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = 20, linetype="dashed", 
+                color = "gray", size=1)
+
+Fig1_v1C.gd <- ggplot(data = filter(visited_1st_4d_data,
+                                 !females_removed, !mom_at_init,
+                                 visit_ends >= initiation_date,
+                                 visit_ends < last_day_fID)) +
+  geom_area(aes(x = guard_duration, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Guarding duration") +
+  ylab("Proportion\nof secondary visitors") +
+  scale_color_manual(values = c("black", "brown1")) +
+  scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = 20, linetype="dashed", 
+                color = "gray", size=1)
+
+(Fig1_v1ABC.gd <- ggpubr::ggarrange(Fig1_v1A.gd +
+            theme(legend.justification = c(1,1),
+                  legend.position = "none") +
+            xlim(-4,52),
+         Fig1_v1B.gd + 
+           theme(legend.justification = c(1,1),
+                 legend.position = "none") +
+            xlim(-4,52),
+         Fig1_v1C.gd + 
+           theme(legend.justification = c(1,1),
+                 legend.position = c(0.95,0.95)) +
+            xlim(-4,52),
+         align = "v",
+         labels = c("A", "B", "C"),
+         ncol = 1, nrow = 3))
+```
+
+
+
+
+*Dealing with non-independence of multi-initiators: Using only longest or shortest initiator*
+Sample sizes
+```{r}
+# Samples sizes for "not visited" are the same across longests and shortests
+filter(visited_1st_4d_data_tb, `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID,
+                                 initL) %>% nrow()
+
+filter(visited_1st_4d_data_tb, `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID,
+                                 initS) %>% nrow()
+
+# Shortests have more females than longests for some reason??
+filter(visited_1st_4d_data_tb, `visited in 4 days` == "Visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID,
+                                 initL) %>% nrow()
+
+filter(visited_1st_4d_data_tb, `visited in 4 days` == "Visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID,
+                                 initS) %>% nrow()
+
+visited_1st_4d_data_tb %>% filter(initL, mom_at_init, num_at_init>1) %>% nrow() # 34
+visited_1st_4d_data_tb %>% filter(initS, mom_at_init, num_at_init>1) %>% nrow() # 36
+
+visited_1st_4d_data_tb %>% filter(initL, mom_at_init, num_at_init>1,
+                                  !grepl("U", Female_ID), !females_removed) %>% nrow() # 13
+
+visited_1st_4d_data_tb %>% filter(initS, mom_at_init, num_at_init>1,
+                                  !grepl("U", Female_ID), !females_removed) %>% nrow() # 12
+
+visited_1st_4d_data_tb %>% filter(initL, mom_at_init, num_at_init>1,
+                                  !grepl("U", Female_ID), !females_removed,
+                                  clutch_initiated_order == 1) %>% nrow() # 12
+
+visited_1st_4d_data_tb %>% filter(initS, mom_at_init, num_at_init>1,
+                                  !grepl("U", Female_ID), !females_removed,
+                                  clutch_initiated_order == 1) %>% nrow() # 11
+
+visited_1st_4d_data_tb %>% filter(initL, mom_at_init, num_at_init>1,
+                                  !grepl("U", Female_ID), !females_removed,
+                                  clutch_initiated_order == 1, visit_ends < last_day_fID) %>% nrow() # 5
+
+visited_1st_4d_data_tb %>% filter(initS, mom_at_init, num_at_init>1,
+                                  !grepl("U", Female_ID), !females_removed,
+                                  clutch_initiated_order == 1, visit_ends < last_day_fID) %>% nrow() # 11
+
+# there are two possible reasons why samples sizes are not equal for tbL and tbS:
+#  1) clutch_initiated_order==1: sometimes one of the initiators had already laid a clutch, so this was not her first clutch
+#    - this happened once each for shortests and longests, so not the source of unevenness
+#  2) visit < last_day_fID: sometimes one of the initiators was never seen again
+#    - this happened 7 times for longests, 0 for shortests. *** is that biologically significant? ***
+```
+
+### How does including the females that were never observed again affect the results? 
+This will fix the unequal sample sizes for the tie-breaking but will it introduce undue spurious observations?
+
+No tie-breaking.
+```{r}
+Fig1_v2A <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+Fig1_v2B <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+(Fig1_v2AB <- ggarrange(Fig1_v2A +
+            theme(legend.position = "none") +
+            xlim(-30,34),
+         Fig1_v2B + 
+           theme(legend.justification = c(1,1),
+                 legend.position = c(0.95,0.95)) +
+            ylab("Number of females") +
+            xlim(-30,34),
+         labels = c("A", "B"),
+         ncol = 1, nrow = 2))
+```
+Longest initiators only
+```{r}
+Fig1_v3A <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1,
+                                 initL)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+Fig1_v3B <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1,
+                                 initL)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+(Fig1_v3AB <- ggarrange(Fig1_v3A +
+            theme(legend.justification = c(1,1),
+                  legend.position = c(0.95,0.95)) +
+            xlim(-30,34),
+         Fig1_v3B + 
+           theme(legend.justification = c(1,1),
+                 legend.position = c(0.95,0.95)) +
+            ylab("Number of females") +
+            xlim(-30,34),
+         labels = c("A", "B"),
+         ncol = 1, nrow = 2))
+```
+Shortest initiators only
+```{r}
+Fig1_v4A <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1,
+                                 initS)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+Fig1_v4B <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1,
+                                 initS)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+(Fig1_v4AB <- ggarrange(Fig1_v4A +
+            theme(legend.justification = c(1,1),
+                  legend.position = c(0.95,0.95)) +
+            xlim(-30,34),
+            Fig1_v4B + 
+           theme(legend.justification = c(1,1),
+                 legend.position = c(0.95,0.95)) +
+            ylab("Number of females") +
+            xlim(-30,34),
+         labels = c("A", "B"),
+         ncol = 1, nrow = 2))
+```
+
+## Figure 2
+*Are early-visited females more likely to desert early?*
+Note that the observations for Day 0 are not independent because they come from two (or more) females on the same clutch. Some of these are technically the initiator while the other are visitors. When (if) running stats, I can include only the "longest initiator" or "shortest initiator" to satisfy independence and then compare the results of the two options.
+```{r}
+first_visit_cuts <- strats_data %>%
+  filter(!mom_at_init, visit_starts > initiation_date) %>%
+  arrange(location, visit_starts) %>%
+  group_by(location) %>%
+  slice_head(n=1) %>%
+  summarize(first_visit_starts = ifelse(num_at_init > 1, 0, as.numeric(visit_starts-initiation_date))) %>%
+  mutate(first_visit_cut = cut(first_visit_starts, breaks=seq(0,40,4)))
+
+visit_cuts_data_ExDis <- visited_1st_4d_data_tb %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "Day 0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "Day 1-4",
+                                        ifelse(first_visit_cut=="(4,8]", "Day 5-8",
+                                               "Day 9+")))),
+         vis_cat = factor(vis_cat, levels = c("Day 0","Day 1-4","Day 5-8",
+                                              "Day 9+","never visited"))) %>%
+  filter(!females_removed, mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID,
+         # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
+         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
+         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+         !is.na(vis_cat))
+
+(Fig1_v1D <- ggplot(data = visit_cuts_data_ExDis, 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of initiating female (days)") +
+  theme(legend.position = "bottom"))
+
+## Adding secondary visitors
+### no tb
+visitors_ExDis_notb <- visited_1st_4d_data_tb %>%
+  semi_join(visit_cuts_data_ExDis, by=c("location")) %>%
+  filter(!females_removed, !mom_at_init, visit_starts >= initiation_date,
+         visit_ends < last_day_fID)
+
+visitors_ExDis_notb_fig <- ggplot(data = visitors_ExDis_notb, 
+       aes(y = guard_duration, x = "Secondary visitors")) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) + # I can't figure out why the jitter plot is doubling up on points for a given guard duration...
+  theme_publilia() +
+  ylab("Guarding duration of secondary visitor (days)")
+
+(Fig1_v1CD <- ggarrange(Fig1_v1D +
+            ylim(0,50), 
+          visitors_ExDis_notb_fig +
+            ylim(0,50) +
+            theme(axis.title.x = element_blank()),
+          widths = c(6,2.25),
+          ncol = 2, nrow = 1, align = "h"))
+```
+
+Separating longest and shortest initiators: (uneven samples sizes!)
+```{r}
+first_visit_cuts <- visited_1st_4d_data_tb %>%
+  filter(!mom_at_init, visit_starts > initiation_date) %>%
+  arrange(location, visit_starts) %>%
+  group_by(location) %>%
+  slice_head(n=1) %>%
+  summarize(first_visit_starts = ifelse(num_at_init > 1, 0, as.numeric(visit_starts-initiation_date))) %>%
+  mutate(first_visit_cut = cut(first_visit_starts, breaks=seq(0,40,4)))
+
+visit_cuts_data <- visited_1st_4d_data_tb %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "Day 0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "Day 1-4",
+                                        ifelse(first_visit_cut=="(4,8]", "Day 5-8",
+                                               "Day 9+")))),
+         vis_cat = factor(vis_cat, levels = c("Day 0","Day 1-4","Day 5-8",
+                                              "Day 9+","never visited"))) %>%
+  filter(!females_removed, mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID,
+         # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
+         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
+         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+         !is.na(vis_cat))
+
+ggplot(data = filter(visit_cuts_data, initL), 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_boxplot() +
+  geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of the initiating female") +
+  theme(legend.position = "bottom") +
+  ggtitle("longest intitiators only")
+
+ggplot(data = filter(visit_cuts_data, initS), 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_boxplot() +
+  geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of the initiating female") +
+  theme(legend.position = "bottom") +
+  ggtitle("shortest intitiators only")
+
+# ** why are there more shortest initiators than longest initiators? shouldn't they be equal?
+filter(visit_cuts_data, initL, vis_cat == "Day 0")
+filter(visit_cuts_data, initS, vis_cat == "Day 0")
+
+visited_1st_4d_data_tb %>% filter(initL, mom_at_init, num_at_init>1)
+visited_1st_4d_data_tb %>% filter(initS, mom_at_init, num_at_init>1)
+
+filter(clutch_status_guarding_summary_v2, location == "A18_8", mom_at_init) %>%
+  select(Female_ID:hatch_date, first_visitor_initiator, init_dur_rank:init_first_dur_shortest)
+```
+
+Separating longest and shortest initiators (excluding females that disappeared after first clutch):
+```{r}
+first_visit_cuts <- visited_1st_4d_data_tb %>%
+  filter(!mom_at_init, visit_starts > initiation_date) %>%
+  arrange(location, visit_starts) %>%
+  group_by(location) %>%
+  slice_head(n=1) %>%
+  summarize(first_visit_starts = ifelse(num_at_init > 1, 0, as.numeric(visit_starts-initiation_date))) %>%
+  mutate(first_visit_cut = cut(first_visit_starts, breaks=seq(0,40,4)))
+
+visit_cuts_data <- visited_1st_4d_data_tb %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "Day 0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "Day 1-4",
+                                        ifelse(first_visit_cut=="(4,8]", "Day 5-8",
+                                               "Day 9+")))),
+         vis_cat = factor(vis_cat, levels = c("Day 0","Day 1-4","Day 5-8",
+                                              "Day 9+","never visited"))) %>%
+  filter(!females_removed, mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         #visit_ends < last_day_fID,
+         # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
+         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
+         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+         !is.na(vis_cat))
+
+(Fig1_v2D <- ggplot(data = visit_cuts_data, 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of the initiating female") +
+  theme(legend.position = "bottom"))
+
+(Fig1_v3D <- ggplot(data = filter(visit_cuts_data, initL), 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of the initiating female") +
+  theme(legend.position = "bottom"))
+
+(Fig1_v4D <- ggplot(data = filter(visit_cuts_data, initS), 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of the initiating female") +
+  theme(legend.position = "bottom"))
+
+## Adding secondary visitors
+### no tb
+visitors_InDis_notb <- visited_1st_4d_data_tb %>%
+  semi_join(filter(visit_cuts_data, initL), by=c("location")) %>%
+  filter(!females_removed, !mom_at_init | !initL, visit_starts >= initiation_date)
+
+visitors_InDis_notb_fig <- ggplot(data = visitors_InDis_notb, 
+       aes(y = guard_duration, x = "Secondary visitors")) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) + # I can't figure out why the jitter plot is doubling up on points for a given guard duration...
+  theme_publilia() +
+  ylab("Guarding duration of the visiting female")
+
+(Fig1_v2CD <- ggarrange(Fig1_v2D +
+            ylim(0,50), 
+          visitors_InDis_notb_fig +
+            ylim(0,50) +
+            theme(axis.title.x = element_blank()),
+          widths = c(6,2.25),
+          ncol = 2, nrow = 1, align = "h"))
+
+### initL
+visitors_InDis_initL <- visited_1st_4d_data_tb %>%
+  semi_join(filter(visit_cuts_data, initL), by=c("location")) %>%
+  filter(!females_removed, !mom_at_init | !initL, visit_starts >= initiation_date)
+
+visitors_InDis_initL_fig <- ggplot(data = visitors_InDis_initL, 
+       aes(y = guard_duration, x = "Secondary visitors")) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) + # I can't figure out why the jitter plot is doubling up on points for a given guard duration...
+  theme_publilia() +
+  ylab("Guarding duration of the visiting female")
+
+(Fig1_v3CD <- ggarrange(Fig1_v3D +
+            ylim(0,50), 
+          visitors_InDis_initL_fig +
+            ylim(0,50) +
+            theme(axis.title.x = element_blank()),
+          widths = c(6,2.25),
+          ncol = 2, nrow = 1, align = "h"))
+
+### initS
+visitors_InDis_initS <- visited_1st_4d_data_tb %>%
+  semi_join(filter(visit_cuts_data, initS), by=c("location")) %>%
+  filter(!females_removed, !mom_at_init | !initS, visit_starts >= initiation_date)
+
+visitors_InDis_initS_fig <- ggplot(data = visitors_InDis_initS, 
+       aes(y = guard_duration, x = "Secondary visitors")) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) + # I can't figure out why the jitter plot is doubling up on points for a given guard duration...
+  theme_publilia() +
+  ylab("Guarding duration of the visiting female")
+
+(Fig1_v4CD <- ggarrange(Fig1_v4D +
+            ylim(0,50), 
+          visitors_InDis_initS_fig +
+            ylim(0,50) +
+            theme(axis.title.x = element_blank()),
+          widths = c(6,2.25),
+          ncol = 2, nrow = 1, align = "h"))
+         
+```
+
+*Collecting combined plots*
+The key thing to note is that nothing really changes substantially in all of the histograms except that 
+(1) including the disappeared females muddles the peaks and that 
+(2) comparing the longest and shortest initiator tie-breaks for the 2nd figure suggests that most of these shortest initiators probably represent visitors who happened to arrive shortly after initiation. That's still a bit hard to tell though because even some of the females that were never visited still deserted early.
+
+I think presenting the original version for the "histogram" is best, because it doesn't show the probably spurious (depredation) earlyish "desertion" events which muddle the key findings (i.e. use Fig1_v1AB). It should just be made explicit that more than one females may be included from a single clutch, so it would violate independence if we run stats on this. 
+
+An alternative would be to choose the "longest" tie-breaker, exclude females that disappeared and just be ok with the missing data (due to higher rates of depredation or emigration) relative to the "shortest" tie-breaker, the main interest is comparing relative abundance of strategies rather than comparing the tie-breaking methods per se.
+
+That could actually double as a solution for the second figure as well, since we definitely need to avoid breaking the assumption of independence for that. Ok so, below this code block I'll do "v5" which will be "Longest initiator, exclude disappeared"
+```{r}
+# 1) Original - both initiators, exclude disappeared females
+annotate_figure(Fig1_v1AB, top = text_grob("v1: Original - both \"initiators\", exclude disappeared females"))
+# 2) Both initiators, include disappeared
+annotate_figure(Fig1_v2AB, top = text_grob("v2: Both \"initiators\", include disappeared"))
+# 3) Longest initiator, include disappeared
+annotate_figure(Fig1_v3AB, top = text_grob("v3: Longest initiator, include disappeared"))
+# 4) Shortest initiator, include disappeared
+annotate_figure(Fig1_v4AB, top = text_grob("v4: Shortest initiator, include disappeared"))
+
+# 1) Original - both initiators, exclude disappeared females
+annotate_figure(Fig1_v1CD, top = text_grob("v1: Original - both \"initiators\", exclude disappeared females"))
+# 2) Both initiators, include disappeared
+annotate_figure(Fig1_v2CD, top = text_grob("v2: Both \"initiators\", include disappeared"))
+# 3) Longest initiator, include disappeared
+annotate_figure(Fig1_v3CD, top = text_grob("v3: Longest initiator, include disappeared"))
+# 4) Shortest initiator, include disappeared
+annotate_figure(Fig1_v4CD, top = text_grob("v4: Shortest initiator, include disappeared"))
+```
+
+*Longest initiators only, disappeared females excluded*
+But is this too strong an assumption? I just need to discuss the differences between longest and shortest tie-breaks, but I can just show the longest I think.
+```{r}
+Fig1_v5A <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID,
+                                 initL)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+Fig1_v5B <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID,
+                                 initL)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+(Fig1_v5AB <- ggarrange(Fig1_v5A +
+            theme(legend.justification = c(1,1),
+                  legend.position = c(0.95,0.95)) +
+            xlim(-30,34),
+         Fig1_v5B + 
+           theme(legend.justification = c(1,1),
+                 legend.position = c(0.95,0.95)) +
+            xlim(-30,34),
+         labels = c("A", "B"),
+         ncol = 1, nrow = 2))
+
+### initL
+Fig1_v5D <- ggplot(data = filter(visit_cuts_data_ExDis, initL), 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of initiator (Days)") +
+  theme(legend.position = "bottom")
+
+visitors_ExDis_initL <- visited_1st_4d_data_tb %>%
+  semi_join(filter(visit_cuts_data_ExDis, initL), by=c("location")) %>%
+  filter(!females_removed, !mom_at_init | !initL, visit_starts >= initiation_date,
+         visit_ends < last_day_fID)
+
+visitors_ExDis_initL_fig <- ggplot(data = visitors_InDis_initL, 
+       aes(y = guard_duration, x = "Secondary visitors")) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) + # I can't figure out why the jitter plot is doubling up on points for a given guard duration...
+  theme_publilia() +
+  ylab("Guarding duration of the visiting female")
+
+(Fig1_v5CD <- ggarrange(Fig1_v5D +
+            ylim(0,50), 
+          visitors_ExDis_initL_fig +
+            ylim(0,50) +
+            theme(axis.title.x = element_blank()),
+          widths = c(6,2.25),
+          ncol = 2, nrow = 1, align = "h"))
+```
+# Stats
+#### Check Assumptions
+- SDs not equal: ranges from 16.4 to 36.6, but passes levene test for homogeneity of variance
+- one extreme outlier: E18_8 E_Grrk (desert, control)
+- fails the Shapiro-Wilk test of normality
+```{r}
+strats_cuts_v5.data <- filter(visit_cuts_data_ExDis, initL)
+
+# Samples sizes in each group
+strats_cuts_v5.data %>% count(vis_cat)
+
+# Means and SDs
+strats_cuts_v5.data %>%
+  group_by(vis_cat) %>%
+  summarize(mean = mean(guard_duration),
+            sd = sd(guard_duration))
+
+# Check for outliers
+strats_cuts_v5.data %>%
+  select(vis_cat, guard_duration, location, Female_ID) %>%
+  group_by(vis_cat) %>%
+  identify_outliers(guard_duration)
+
+# Build the linear model
+model  <- lm(guard_duration ~ vis_cat,
+             data = strats_cuts_v5.data)
+
+# Create a QQ plot of residuals
+ggqqplot(residuals(model))
+
+# Compute Shapiro-Wilk test of normality
+shapiro_test(residuals(model))
+
+# SW test by group
+strats_cuts_v5.data %>%
+  group_by(vis_cat) %>%
+  shapiro_test(guard_duration)
+
+# QQ plot per group
+ggqqplot(strats_cuts_v5.data, "guard_duration", ggtheme = theme_bw()) +
+  facet_wrap(vars(vis_cat))
+
+# Homogeneity of variance
+strats_cuts_v5.data %>% levene_test(guard_duration ~ vis_cat)
+```
+
+#### Computation
+Desertion category was significant but not ants or interaction.
+```{r}
+strats_cuts_v5.aov <- strats_cuts_v5.data %>% anova_test(guard_duration ~ vis_cat)
+strats_cuts_v5.aov
+
+strats_cuts_v5.tukey <- strats_cuts_v5.data %>% tukey_hsd(guard_duration ~ vis_cat)
+
+# Visualization: box plots with p-values
+strats_cuts_v5.tukey <- strats_cuts_v5.tukey %>% add_xy_position(x = "vis_cat")
+(Fig1_v5D.stats <- Fig1_v5D +
+  stat_pvalue_manual(strats_cuts_v5.tukey, hide.ns=T) +
+  labs(
+    subtitle = get_test_label(strats_cuts_v5.aov, detailed = TRUE),
+    caption = get_pwc_label(strats_cuts_v5.tukey)
+    ) +
+  xlab("Day first visited (Days since initiation)") +
+  ylab("Guard duration of initiating female"))
+```
+
+
+#### Computation
+v1
+```{r}
+strats_cuts_v1.data <- visit_cuts_data_ExDis
+
+strats_cuts_v1.aov <- strats_cuts_v1.data %>% anova_test(guard_duration ~ vis_cat)
+strats_cuts_v1.aov
+
+strats_cuts_v1.tukey <- strats_cuts_v1.data %>% tukey_hsd(guard_duration ~ vis_cat)
+
+# Visualization: box plots with p-values
+strats_cuts_v1.tukey <- strats_cuts_v1.tukey %>% add_xy_position(x = "vis_cat")
+(Fig1_v1D.stats <- Fig1_v1D +
+  stat_pvalue_manual(strats_cuts_v1.tukey, hide.ns=T, tip.length=0.01) +
+  labs(
+    subtitle = get_test_label(strats_cuts_v1.aov, detailed = TRUE),
+    caption = get_pwc_label(strats_cuts_v1.tukey)
+    ) +
+  xlab("Age of clutch when first visited by secondary female (days)") +
+  ylab("Guarding duration of initiating female (days)"))
+```
+
+#### Computation
+v2
+```{r}
+strats_cuts_v4.data <- visit_cuts_data_ExDis
+
+strats_cuts_v4.aov <- strats_cuts_v4.data %>% anova_test(guard_duration ~ vis_cat)
+strats_cuts_v4.aov
+
+strats_cuts_v4.tukey <- strats_cuts_v4.data %>% tukey_hsd(guard_duration ~ vis_cat)
+
+# Visualization: box plots with p-values
+strats_cuts_v4.tukey <- strats_cuts_v4.tukey %>% add_xy_position(x = "vis_cat")
+(Fig1_v4D.stats <- Fig1_v4D +
+  stat_pvalue_manual(strats_cuts_v4.tukey, hide.ns=T) +
+  labs(
+    subtitle = get_test_label(strats_cuts_v4.aov, detailed = TRUE),
+    caption = get_pwc_label(strats_cuts_v4.tukey)
+    ) +
+  xlab("Day first visited (Days since initiation)") +
+  ylab("Guard duration of initiating female"))
+```
+
+#### Non-parametric version
+```{r}
+# non-parametric: Kruskall-Wallis test followed by Dunn test or pairwise wilcox tests
+vis_cat_v1.data <- visited_1st_4d_data %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
+         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
+                                              "5+","never visited"))) %>%
+  filter(!females_removed, mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID,
+         # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
+         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
+         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+         !is.na(vis_cat))
+
+ggplot(vis_cat_v1.data, aes(x=first_visit_starts, y=guard_duration)) +
+  geom_count() +
+  geom_smooth(method=lm)
+
+(Fig1_v1D <- ggplot(data = vis_cat_v1.data, 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_violin(aes(fill=vis_cat%in%c("0","1 to 4")), color = NA, trim=T, size=2, alpha=0.50) +
+  geom_jitter(aes(color=vis_cat%in%c("0","1 to 4")), width=0.1, size=3) +
+  theme_publilia() +
+  scale_color_brewer(palette="Set2") + scale_fill_brewer(palette="Set2") +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of initiating female (days)") +
+  theme(legend.position = "none"))
+
+strats_cuts_v1.KWtest <- vis_cat_v1.data %>% kruskal_test(guard_duration ~ vis_cat)
+strats_cuts_v1.KWtest
+rank_epsilon_squared(guard_duration ~ vis_cat, data = vis_cat_v1.data)
+
+strats_cuts_v1.dunn <- vis_cat_v1.data %>% dunn_test(guard_duration ~ vis_cat)
+strats_cuts_v1.dunn
+
+strats_cuts_v1.dunn.vec <- strats_cuts_v1.dunn$p.adj.signif
+names(strats_cuts_v1.dunn.vec) <- paste(strats_cuts_v1.dunn$group1,strats_cuts_v1.dunn$group2,sep="-")
+strats_cuts_v1.multcompLetters <- tibble(vis_cat=names(multcompLetters(strats_cuts_v1.dunn.vec)$Letters),
+                            label=unname(multcompLetters(strats_cuts_v1.dunn.vec)$Letters))
+
+# Visualization: box plots with p-values
+(Fig1_v1D.stats.nonpara <- Fig1_v1D +
+    geom_text(data=strats_cuts_v1.multcompLetters, aes(x=vis_cat, y=-4, label=label, color=vis_cat%in%c("0","1 to 4")), fontface="bold", size=6) +
+  labs(
+    subtitle = get_test_label(strats_cuts_v1.KWtest, detailed = TRUE),
+    caption = get_pwc_label(strats_cuts_v1.dunn)
+    ) +
+  xlab("Day first visited (Days since initiation)") +
+  ylab("Guard duration of initiating female") +
+    theme(legend.position = "none"))
+```
+
+#### Non-parametric version, but including females that disappeared or were unmarked
+Three clutches were omitted from the analysis. Two were visited after hatching, and one had no females present at initiation.
+```{r}
+# non-parametric: Kruskall-Wallis test followed by Dunn test or pairwise wilcox tests
+vis_cat_v2.data <- visited_1st_4d_data %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
+         vis_cat = ifelse(location=='E40_9', "never visited", vis_cat),
+         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
+                                              "5+","never visited"))) %>%
+  filter(!females_removed, mom_at_init, 
+         clutch_initiated_order == 1, !is.na(vis_cat))
+
+# # where do the NAs come from?
+# vis_cat_v2.data %>% filter(is.na(vis_cat))
+# visited_1st_4d_data %>% filter(location=='C41_6')
+# # C41_6 was deserted immediately, then visited long after hatch
+# visited_1st_4d_data %>% filter(location=='E148_6')
+# # E148_6 was also visited long after hatch
+# visited_1st_4d_data %>% filter(location=='E40_9')
+# # There was one female (E_Gkgg: E40_9) on the eggs before and after but not ON the init date.
+# # I suspect I missed her in the field or she may have left and come back. She was never visited
+# # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+
+ggplot(vis_cat_v2.data, aes(x=first_visit_starts, y=guard_duration)) +
+  geom_count() +
+  geom_smooth(method=lm)
+
+(vis_start.vs.guard_dur.v2.p <- ggplot(data = vis_cat_v2.data, 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_violin(aes(fill=vis_cat%in%c("0","1 to 4")), color = NA, trim=T, size=2, alpha=0.50) +
+  geom_jitter(aes(color=vis_cat%in%c("0","1 to 4")), width=0.1, size=3) +
+  theme_publilia() +
+  scale_color_brewer(palette="Set2") + scale_fill_brewer(palette="Set2") +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of initiating female (days)") +
+  theme(legend.position = "none"))
+
+strats_cuts_v2.KWtest <- vis_cat_v2.data %>% kruskal_test(guard_duration ~ vis_cat)
+strats_cuts_v2.KWtest
+rank_epsilon_squared(guard_duration ~ vis_cat, data = vis_cat_v2.data)
+
+strats_cuts_v2.dunn <- vis_cat_v2.data %>% dunn_test(guard_duration ~ vis_cat)
+strats_cuts_v2.dunn
+
+strats_cuts_v2.dunn.vec <- strats_cuts_v2.dunn$p.adj.signif
+names(strats_cuts_v2.dunn.vec) <- paste(strats_cuts_v2.dunn$group1,strats_cuts_v2.dunn$group2,sep="-")
+strats_cuts_v2.multcompLetters <- tibble(vis_cat=names(multcompLetters(strats_cuts_v2.dunn.vec)$Letters),
+                            label=unname(multcompLetters(strats_cuts_v2.dunn.vec)$Letters))
+
+# Visualization: box plots with p-values
+(vis_start.vs.guard_dur.v2.stats.nonpara.p <- vis_start.vs.guard_dur.v2.p +
+    geom_text(data=strats_cuts_v2.multcompLetters, aes(x=vis_cat, y=-4, label=label, color=vis_cat%in%c("0","1 to 4")), fontface="bold", size=6) +
+  labs(
+    subtitle = get_test_label(strats_cuts_v2.KWtest, detailed = TRUE),
+    caption = get_pwc_label(strats_cuts_v2.dunn)
+    ) +
+  xlab("Day first visited (Days since initiation)") +
+  ylab("Guard duration of initiating female") +
+    theme(legend.position = "none"))
+
+ggsave("guard_dur.vs.first_visit.v2.png",
+       vis_start.vs.guard_dur.v2.stats.nonpara.p,
+       device = "png",
+       width = 160, height = 120, units = "mm", dpi = "print")
+```
+
+### Comparing early desertion by initiator vs. latest desertion of leaf by any female vs. latest desertion of the plant by any female
+```{r}
+visit_data.desL.desP <- visited_1st_4d_data %>%
+  left_join(first_visit_cuts) %>%
+  group_by(location) %>% mutate(last_visit_ends_L = max(visit_ends, na.rm=T)) %>% ungroup() %>%
+  separate(location, into = c("DormPlant", "Leaf"), sep="_", remove=FALSE) %>%
+  group_by(DormPlant) %>% mutate(last_visit_ends_P = max(visit_ends, na.rm=T)) %>% ungroup() %>%
+  mutate(last_desL_rel2h = last_visit_ends_L-est_hatch,
+         last_desP_rel2h = last_visit_ends_P-est_hatch)
+
+# sloped
+visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, visit_ends<last_day_fID, !grepl("U", Female_ID)) %>%
+ggplot(data = ., aes(x=est_rel2h, y=last_desL_rel2h)) +
+  geom_abline(slope=1,intercept=0, color="gray") +
+  geom_count(aes(color=`visited in 4 days`), alpha=0.75) +
+  geom_vline(xintercept = -16, linetype="dotted", color = "gray", size=1) +
+  geom_vline(xintercept = 4, linetype="dotted", color = "gray", size=1) +
+  scale_color_brewer(palette="Set2") +
+  facet_wrap(~ants_removed) + ylim(-30,60) + xlim(-25,32)
+
+visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, visit_ends<last_day_fID, !grepl("U", Female_ID)) %>%
+ggplot(data = ., aes(x=est_rel2h, y=last_desP_rel2h)) +
+  geom_abline(slope=1,intercept=0, color="gray") +
+  geom_count(aes(color=`visited in 4 days`), alpha=0.75) +
+  geom_vline(xintercept = -16, linetype="dotted", color = "gray", size=1) +
+  geom_vline(xintercept = 4, linetype="dotted", color = "gray", size=1) +
+  scale_color_brewer(palette="Set2") +
+  facet_wrap(~ants_removed) + ylim(-30,60) + xlim(-25,32)
+
+# residuals
+des.vs.desL.p.facet <- visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, visit_ends<last_day_fID, !grepl("U", Female_ID)) %>%
+ggplot(data = .) +
+  geom_rect(data=data.frame(xmin=-Inf,xmax=-16, ymin=-Inf, ymax=Inf), 
+            aes(xmin=-Inf,xmax=-16, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_rect(data=data.frame(xmin=4,xmax=Inf, ymin=-Inf, ymax=Inf), 
+            aes(xmin=4,xmax=Inf, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_count(aes(x=est_rel2h, y=last_desL_rel2h-est_rel2h, color=`visited in 4 days`), alpha=0.75) +
+  scale_color_brewer(palette="Set2") + ylim(0,80) +
+  xlab("Desertion date of initiator relative to hatch") +
+  ylab("Number of days a female remained on\nleaf after initiator") +
+  facet_wrap(~ants_removed)
+
+des.vs.desP.p.facet <- visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, visit_ends<last_day_fID, !grepl("U", Female_ID)) %>%
+ggplot(data = .) +
+  geom_rect(data=data.frame(xmin=-Inf,xmax=-16, ymin=-Inf, ymax=Inf), 
+            aes(xmin=-Inf,xmax=-16, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_rect(data=data.frame(xmin=4,xmax=Inf, ymin=-Inf, ymax=Inf), 
+            aes(xmin=4,xmax=Inf, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_count(aes(x=est_rel2h, y=last_desP_rel2h-est_rel2h, color=`visited in 4 days`), alpha=0.75) +
+  scale_color_brewer(palette="Set2") + ylim(0,80) +
+  xlab("Desertion date of initiator relative to hatch") +
+  ylab("Number of days a female remained on\nplant after initiator") +
+  facet_wrap(~ants_removed)
+
+(des.vs.desL.vs.desP.p.facet <- ggpubr::ggarrange(
+  des.vs.desL.p.facet +
+    theme(legend.justification = c(1,1)) +
+    xlim(-30,34),
+  des.vs.desP.p.facet + 
+    theme(legend.justification = c(1,1)) +
+    xlim(-30,34),
+  common.legend = T, legend = "right",
+  align = "h", labels = c("A", "B"), ncol = 2, nrow = 1))
+
+# residuals, not facetted
+des.vs.desL.p <- visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, visit_ends<last_day_fID, !grepl("U", Female_ID),
+         !is.na(`visited in 4 days`)) %>%
+ggplot(data = .) +
+  geom_rect(data=data.frame(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), 
+            aes(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_rect(data=data.frame(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), 
+            aes(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_count(aes(x=est_rel2h, y=last_desL_rel2h-est_rel2h, color=`visited in 4 days`), alpha=0.75, shape=16) +
+  scale_color_brewer(palette="Set2") + ylim(0,77) +
+  xlab("Desertion date of initiator\nrelative to hatch") +
+  ylab("Number of days a female remained on\nleaf after initiator")
+
+des.vs.desP.p <- visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, visit_ends<last_day_fID, !grepl("U", Female_ID),
+         !is.na(`visited in 4 days`)) %>%
+ggplot(data = .) +
+  geom_rect(data=data.frame(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), 
+            aes(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_rect(data=data.frame(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), 
+            aes(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_count(aes(x=est_rel2h, y=last_desP_rel2h-est_rel2h, color=`visited in 4 days`), alpha=0.75, shape=16) +
+  scale_color_brewer(palette="Set2") + ylim(0,77) +
+  xlab("Desertion date of initiator\nrelative to hatch") +
+  ylab("Number of days a female remained on\nplant after initiator")
+
+(des.vs.desL.vs.desP.p <- ggpubr::ggarrange(
+  des.vs.desL.p +
+    theme(legend.justification = c(1,1)) +
+    xlim(-23,30),
+  des.vs.desP.p + 
+    theme(legend.justification = c(1,1)) +
+    xlim(-23,30),
+  common.legend = T, legend = "right",
+  align = "h", labels = c("A", "B"), ncol = 2, nrow = 1))
+
+ggsave("des_vs_desL_vs_desP.png",
+       des.vs.desL.vs.desP.p,
+       device = "png",
+       width = 240, height = 120, units = "mm", dpi = "print")
+
+# residuals, not facetted: include females that disappeared
+des.vs.desL.v2.p <- visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, !is.na(`visited in 4 days`)) %>%
+ggplot(data = .) +
+  geom_rect(data=data.frame(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), 
+            aes(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_rect(data=data.frame(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), 
+            aes(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_count(aes(x=est_rel2h, y=last_desL_rel2h-est_rel2h, color=`visited in 4 days`), alpha=0.75, shape=16) +
+  scale_color_brewer(palette="Set2") + ylim(0,77) +
+  xlab("Desertion date of initiator\nrelative to hatch") +
+  ylab("Number of days a female remained on\nleaf after initiator")
+
+des.vs.desP.v2.p <- visit_data.desL.desP %>% filter(!females_removed) %>%
+  filter(clutch_initiated_order==1, !is.na(`visited in 4 days`)) %>%
+ggplot(data = .) +
+  geom_rect(data=data.frame(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), 
+            aes(xmin=-Inf,xmax=-15, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_rect(data=data.frame(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), 
+            aes(xmin=5,xmax=Inf, ymin=-Inf, ymax=Inf), fill="gray", alpha=0.2) +
+  geom_count(aes(x=est_rel2h, y=last_desP_rel2h-est_rel2h, color=`visited in 4 days`), alpha=0.75, shape=16) +
+  scale_color_brewer(palette="Set2") + ylim(0,77) +
+  xlab("Desertion date of initiator\nrelative to hatch") +
+  ylab("Number of days a female remained on\nplant after initiator")
+
+(des.vs.desL.vs.desP.v2.p <- ggpubr::ggarrange(
+  des.vs.desL.v2.p +
+    theme(legend.justification = c(1,1)) +
+    xlim(-23,30),
+  des.vs.desP.v2.p + 
+    theme(legend.justification = c(1,1)) +
+    xlim(-23,30),
+  common.legend = T, legend = "right",
+  align = "h", labels = c("A", "B"), ncol = 2, nrow = 1))
+
+ggsave("des_vs_desL_vs_desP.v2.png",
+       des.vs.desL.vs.desP.v2.p,
+       device = "png",
+       width = 240, height = 120, units = "mm", dpi = "print")
+```
+
+
+
+### Save selected figures for chapter
+I will use the original filtering because I feel it best represents the complexity of the data without making too stringent or tenuous assumptions. I think showing only the data from a "longest" tie break could be missing the possibility/uncertainty that some initiators may desert early when visited and some may not, even if it avoids breaking the assumption of independence for statistical tests. I should just discuss this and include the v5 figure in the supplemental/appendix.
+
+Main
+```{r}
+desertion_firstclutch_hist <- Fig1_v1AB
+guard_dur.vs.first_visit <- Fig1_v1D.stats.nonpara
+
+ggsave("desertion_firstclutch_hist.png",
+       desertion_firstclutch_hist,
+       device = "png",
+       width = 120, height = 140, units = "mm", dpi = "print")
+
+ggsave("guard_dur.vs.first_visit.png",
+       guard_dur.vs.first_visit,
+       device = "png",
+       width = 160, height = 120, units = "mm", dpi = "print")
+
+ggsave("desertion_firstclutch_hist_v2.png", # include females that disappeared
+       Fig1_v2AB,
+       device = "png",
+       width = 120, height = 140, units = "mm", dpi = "print")
+```
+
+Supplement
+```{r}
+duration_firstclutch_hist <- Fig1_v1ABC.gd
+ggsave("duration_firstclutch_hist.png",
+       duration_firstclutch_hist,
+       device = "png",
+       width = 120, height = 180, units = "mm", dpi = "print")
+```
+
+
+### Stats for text
+In the control treatment, where ants had free access to females and their clutches, females tended to desert their first clutch either within a few days of initiating them (mode = 0-3 days after first eggs, n = 12) or within a few days of the first nymphs hatching (mode = 0-3 days after first nymphs, n = 19). For clutches where ants were excluded, some females also deserted their eggs within the first few days of initiation (mode = 0-3 days after first eggs, n = 11) but those that remained tended to desert well after hatching (mode = 12-15 days after first nymphs, n = 11).
+```{r}
+# control
+visited_1st_4d_data_tb %>%
+  filter(!females_removed, !ants_removed,
+         mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  mutate(dur_cuts = cut(guard_duration, breaks = seq(-1,63,4))) %>%
+  count(dur_cuts) %>%
+  arrange(desc(n))
+
+visited_1st_4d_data_tb %>%
+  filter(!females_removed, !ants_removed,
+         mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  mutate(rel_cuts = cut(as.numeric(est_rel2h, "days"), breaks = seq(-33,33,4))) %>%
+  count(rel_cuts) %>%
+  arrange(desc(n))
+
+# ant removal
+visited_1st_4d_data_tb %>%
+  filter(!females_removed, ants_removed,
+         mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  mutate(dur_cuts = cut(guard_duration, breaks = seq(-1,63,4))) %>%
+  count(dur_cuts) %>%
+  arrange(desc(n))
+
+visited_1st_4d_data_tb %>%
+  filter(!females_removed, ants_removed,
+         mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  mutate(rel_cuts = cut(as.numeric(est_rel2h, "days"), breaks = seq(-33,33,4))) %>%
+  count(rel_cuts) %>%
+  arrange(desc(n))
+```
+
+Of the females that guarded at least until nymphs hatched, females in the ant exclusion enclosure guarded nymphs longer than females in the control enclosure (Estimate = 10 days, W = 1061, p<0.0001; Mann-Whitney U Test).
+```{r}
+wilcox_data <- visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID,
+         est_rel2h >= 0)
+
+ggplot(wilcox_data) +
+  geom_histogram(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 1, size = 0, position = "identity") +
+  facet_wrap(vars(ants), ncol=1)
+
+wilcox.test(as.numeric(est_rel2h, "days") ~ ants, data = wilcox_data,
+            na.rm=TRUE, paired=FALSE, exact=FALSE, conf.int=TRUE)
+```
+
+Of the 96 first clutches included in the analysis (see Methods), 13 had two or more females present on the first day eggs were observed, 24 were otherwise visited by a secondary female within the first 4 days and 14 were visited at some point later. 
+```{r}
+vis_cat_v1.data %>%
+  summarize(n=n())
+
+vis_cat_v1.data %>%
+  group_by(vis_cat) %>%
+  summarize(n=n())
+
+vis_cat_v1.data %>%
+  filter(vis_cat=="0") %>%
+  group_by(location) %>% summarize(n_females_at_init = n()) %>% ungroup() %>%
+  group_by(n_females_at_init) %>% summarize(n = n())
+
+visit_cuts_data_ExDis %>%
+  filter(!females_removed,
+         mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  distinct(location) %>% nrow()
+
+visit_cuts_data_ExDis %>%
+  filter(!females_removed,
+         mom_at_init,
+         num_at_init>1,
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  distinct(location) %>% nrow()
+
+visit_cuts_data_ExDis %>%
+  filter(!females_removed,
+         mom_at_init,
+         vis_cat == "Day 1-4",
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  distinct(location) %>% nrow()
+```
+
+There was no interaction between ant exclusion and clutch age at first visit in any of the following comparisons of females that were first visited at different times, so these data were combined.
+```{r}
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         mom_at_init,
+         guard_duration <= 4,
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  count(ants_removed, `visited in 4 days`)
+
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         mom_at_init,
+         `visited in 4 days`=="Visited",
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  count(ants_removed, guard_duration <= 4)
+
+# ANOVA
+strats_cuts_v1.data <- visit_cuts_data_ExDis
+
+strats_cuts_v1.aov <- strats_cuts_v1.data %>% anova_test(guard_duration ~ vis_cat * ants)
+strats_cuts_v1.aov
+
+ggplot(data = visit_cuts_data_ExDis, 
+       aes(y = guard_duration, x = vis_cat, color = ants, group = interaction(vis_cat,ants))) +
+  geom_boxplot() +
+  #geom_jitter(width=0.2) +
+  theme_publilia() +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of initiating female (days)") +
+  theme(legend.position = "bottom")
+
+# non-parametric: Kruskall-Wallis test followed by Dunn test or pairwise wilcox tests
+strats_cuts_v1.KWtest <- strats_cuts_v1.data %>% kruskal_test(guard_duration ~ vis_cat)
+strats_cuts_v1.KWtest
+rank_epsilon_squared(guard_duration ~ vis_cat, data = strats_cuts_v1.data)
+
+strats_cuts_v1.dunn <- strats_cuts_v1.data %>% dunn_test(guard_duration ~ vis_cat)
+strats_cuts_v1.dunn
+
+pairwise.wilcox.test(strats_cuts_v1.data$guard_duration,
+                                             strats_cuts_v1.data$vis_cat, 
+                                             p.adjust.method = "bonf")
+
+# Visualization: box plots with p-values
+strats_cuts_v1.dunn <- strats_cuts_v1.dunn %>% add_xy_position(x = "vis_cat")
+(Fig1_v4D.stats.nonpara <- Fig1_v4D +
+  stat_pvalue_manual(strats_cuts_v1.dunn, hide.ns=T) +
+  labs(
+    subtitle = get_test_label(strats_cuts_v1.KWtest, detailed = TRUE),
+    caption = get_pwc_label(strats_cuts_v1.dunn)
+    ) +
+  xlab("Day first visited (Days since initiation)") +
+  ylab("Guard duration of initiating female"))
+```
+
+
+Most of the females that deserted early were visited by a secondary female within the first 4 days of initiation (22/26), 
+```{r}
+visit_cuts_data_ExDis %>%
+  filter(!females_removed,
+         mom_at_init,
+         guard_duration <= 4,
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>% nrow()
+
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         mom_at_init,
+         guard_duration <= 4,
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  count(`visited in 4 days`)
+```
+
+but only about half (23/45) of females that were visited within the first 4 days deserted early.
+```{r}
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         mom_at_init,
+         `visited in 4 days`=="Visited",
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID) %>%
+  count(guard_duration <= 4)
+```
+
+The length of time a female guarded her first eggs before first being visited by a secondary female was related to her guarding duration (Figure 2; F = 8.93, p = < 0.0001; ANOVA [shouldn’t this be non-parametric?]). Females that were first visited on the day of initiation or 1-4 days after had significantly shorter guarding times than those that were visited later or never visited (p < 0.05, Tukey post-hoc test). Females that were visited either on the day of initiation or 1-4 days after did not differ significantly from each other nor did females that were visited after day 5 or never visited at all (p > 0.05, Tukey post-hoc test). 
+```{r}
+strats_cuts_v1.data <- visit_cuts_data_ExDis
+
+strats_cuts_v1.aov <- strats_cuts_v1.data %>% anova_test(guard_duration ~ vis_cat)
+strats_cuts_v1.aov
+
+strats_cuts_v1.tukey <- strats_cuts_v1.data %>% tukey_hsd(guard_duration ~ vis_cat)
+
+strats_cuts_v1.tukey <- strats_cuts_v1.tukey %>% add_xy_position(x = "vis_cat")
+(Fig1_v1D.stats <- Fig1_v1D +
+  stat_pvalue_manual(strats_cuts_v1.tukey, hide.ns=T, tip.length=0.01) +
+  labs(
+    subtitle = get_test_label(strats_cuts_v1.aov, detailed = TRUE),
+    caption = get_pwc_label(strats_cuts_v1.tukey)
+    ) +
+  xlab("Age of clutch when first visited by secondary female (days)") +
+  ylab("Guarding duration of initiating female (days)"))
+```
+
+### Visiting female behavior
+Most females laid their first eggs by initiating their own clutch while some females started by visiting an existing clutch (n=115 and 36 respectively). 
+```{r}
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         clutch_visited_order == 1) %>%
+  count(clutch_initiated_order == 1)
+36/115
+
+visited_1st_4d_data_tb %>%
+  filter(females_removed,
+         clutch_visited_order == 1) %>%
+  count(clutch_initiated_order == 1)
+62/100
+
+visited_1st_4d_data_tb %>%
+  filter(clutch_visited_order == 1) %>%
+  count(clutch_initiated_order == 1)
+62/215
+```
+
+Visits by secondary females were typically short (median = X days) and only 2 visitors remained through hatching (Figure 2B). 
+```{r}
+visited_1st_4d_data_tb %>%
+  filter(!females_removed,
+         !mom_at_init,
+         visit_ends < last_day_fID) %>%
+  summarize(n = n(),
+            n_NA = sum(is.na(guard_duration)),
+            mean_gd = mean(as.numeric(guard_duration, "days"), na.rm=T),
+            med_gd = median(as.numeric(guard_duration, "days"), na.rm=T))
+```
+
+#### After the first clutch
+No tie-breaking.
+- Does the increased proportion of females that desert early after the first clutch reflect laying additional clutches on a different leaf of the same plant? And thus adding additional eggs/nymphs to the plant without risking the leaf dying before hatching? Another reason to look at plant-level survivorship.
+ - Do females that their first clutch early lay additional clutches on the same or different plant? Is the pattern the same later in the season?
+```{r}
+Fig1sup_v2A <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order > 1)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+Fig1sup_v2B <- ggplot(data = filter(visited_1st_4d_data_tb, `visited in 4 days` == "Visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order > 1)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+(Fig1sup_v2AB <- ggarrange(Fig1sup_v2A +
+            theme(legend.justification = c(1,1),
+                  legend.position = c(0.95,0.95)) +
+            xlim(-30,34),
+         Fig1sup_v2B + 
+           theme(legend.justification = c(1,1),
+                 legend.position = c(0.95,0.95)) +
+            ylab("Number of females") +
+            xlim(-30,34),
+         labels = c("A", "B"),
+         ncol = 1, nrow = 2))
+```
+
+
+### Figures for FPO
+```{r}
+ggplot(data = 
+         filter(visited_1st_4d_data_tb, !grepl("U", Female_ID), !females_removed, 
+                mom_at_init,
+                clutch_initiated_order == 1, 
+                visit_ends < last_day_fID)) +
+  geom_area(aes(x = guard_duration, y=..density..), 
+            alpha = 0.75, stat='bin', binwidth = 4, 
+            size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Guarding duration (days)") +
+  ylab("Proportion of females")
+
+FPO_freqpoly_all <- ggplot(data = 
+         filter(visited_1st_4d_data_tb, !grepl("U", Female_ID), !females_removed, 
+                mom_at_init,
+                clutch_initiated_order == 1, 
+                visit_ends < last_day_fID)) +
+  geom_area(aes(x = guard_duration, y=..density..), 
+            alpha = 0.75, stat='bin', binwidth = 4, 
+            size = 0, position = "identity") + 
+  xlim(-4,54) +
+  theme_publilia() +
+  xlab("Guarding duration (days)") +
+  ylab("Proportion of females")
+
+ggsave("FPO_freqpoly_all.png", FPO_freqpoly_all,
+       device = "png", width = 120, height = 80, units = "mm", dpi = "print")
+
+FPO_freqpoly_noVis_all <- ggplot(data = 
+         filter(visited_1st_4d_data_tb, !grepl("U", Female_ID), !females_removed, 
+                mom_at_init,
+                `visited in 4 days` == "Not visited",
+                clutch_initiated_order == 1, 
+                visit_ends < last_day_fID)) +
+  geom_area(aes(x = guard_duration, y=..density.., fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, 
+            size = 0, position = "identity") + 
+  ylim(0,0.09) + xlim(-4,54) +
+  theme_publilia() +
+  xlab("Guarding duration (days)") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+  scale_fill_manual(values = c("black", "brown1")) +
+  theme(legend.position="none")
+
+ggsave("FPO_freqpoly_noVis_all.png", FPO_freqpoly_noVis_all,
+       device = "png", width = 120, height = 80, units = "mm", dpi = "print")
+
+FPO_freqpoly_noVis_black <- ggplot(data = 
+         filter(visited_1st_4d_data_tb, !grepl("U", Female_ID), !females_removed, 
+                mom_at_init,
+                `visited in 4 days` == "Not visited",
+                ants == "Ants removed",
+                clutch_initiated_order == 1, 
+                visit_ends < last_day_fID)) +
+  geom_area(aes(x = guard_duration, y=..density..), fill="black",
+            alpha = 0.75, stat='bin', binwidth = 4, 
+            size = 0, position = "identity") + 
+  ylim(0,0.09) + xlim(-4,54) +
+  theme_publilia() +
+  xlab("Guarding duration (days)") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+
+ggsave("FPO_freqpoly_noVis_black.png", FPO_freqpoly_noVis_black,
+       device = "png", width = 120, height = 80, units = "mm", dpi = "print")
+
+ggplot(data = 
+         filter(visited_1st_4d_data_tb, 
+                `visited in 4 days` == "Not visited",
+                !grepl("U", Female_ID), !females_removed, 
+                mom_at_init,
+                clutch_initiated_order == 1, 
+                visit_ends < last_day_fID,
+                initL)) +
+  geom_area(aes(x = est_rel2h, y=..density.., color = ants, fill = ants), 
+            alpha = 0.75, stat='bin', binwidth = 4, 
+            size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1"))
+```
+

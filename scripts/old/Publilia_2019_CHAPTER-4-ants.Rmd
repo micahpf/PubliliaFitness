@@ -1,0 +1,1487 @@
+---
+title: "Publilia_2019_CHAPTER-4-ants"
+author: "micah fletcher"
+date: "3/2/2022"
+output: html_document
+---
+
+# Ant counts on plant; some ants_removed clutches were visited by ants, and vice versa
+```{r}
+ant_counts <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch) %>%
+    summarize(ants_removed=first(ants_removed),
+              females_removed=first(females_removed),
+              n_antsP=sum(ants_P,na.rm=T),
+              mean_antsP=mean(ants_P,na.rm=T),
+              med_antsP=median(ants_P,na.rm=T),
+              ever_antsP=n_antsP>0,
+              n_days_antsP=sum(ants_P>0,na.rm=T),
+              
+              n_antsP_b4h=sum(ants_P&b4h),
+              ever_antsP_b4h=n_antsP_b4h>0,
+              mean_antsP_b4h=mean(ifelse(b4h,ants_P,NA),na.rm=T),
+              med_antsP_b4h=median(ifelse(b4h,ants_P,NA),na.rm=T),
+              
+              n_antsP_afh=sum(ants_P&afh),
+              ever_antsP_afh=n_antsP_afh>0,
+              mean_antsP_afh=mean(ifelse(afh,ants_P,NA),na.rm=T),
+              med_antsP_afh=median(ifelse(afh,ants_P,NA),na.rm=T)) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+ggplot(data=ant_counts,aes(x=Dorm,y=n_antsP, fill=ants_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP, fill=ants_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_b4h, fill=ants_treatment)) +
+  geom_boxplot()
+
+ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_afh, fill=ants_treatment)) +
+  geom_boxplot()
+
+ant_counts %>%
+  count(Dorm,ants_treatment,ever_antsP)
+
+ant_counts %>%
+  count(Dorm,ants_treatment,ever_antsP_b4h)
+
+ant_counts %>%
+  count(Dorm,ants_treatment,ever_antsP_afh)
+
+# how many clutches ever had ants in each of the dorms?
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP), x=Dorm, fill=ants_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP_b4h), x=Dorm, fill=ants_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+ant_counts %>%
+  ggplot(data=., aes(y=as.numeric(ever_antsP_afh), x=Dorm, fill=ants_treatment)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+# how long/extensive was the break-through?
+ant_counts %>%
+  ggplot(data=., aes(x=n_days_antsP)) +
+  geom_histogram() +
+  theme_publilia() + facet_wrap(~ants_treatment, nrow=2)
+```
+
+ant arrival times
+```{r}
+antP_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&(Date<est_hatch),
+           afh=Date>=est_hatch,
+           is_antsP_afh=(ants_P>0)&afh) %>%
+    filter(is_antsP_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antP_arrival_afh=Date-est_hatch) %>%
+  select(location, antP_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antP_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&(Date<est_hatch),
+           afh=Date>=est_hatch,
+           is_antsP_bfh=(ants_P>0)&b4h) %>%
+    filter(is_antsP_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antP_last_b4h=Date-est_hatch) %>%
+  select(location, antP_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&(Date<est_hatch),
+           afh=Date>=est_hatch,
+           is_antsL_afh=(ants_L>0)&afh) %>%
+    filter(is_antsL_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antL_arrival_afh=Date-est_hatch) %>%
+  select(location, antL_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&(Date<est_hatch),
+           afh=Date>=est_hatch,
+           is_antsL_bfh=(ants_L>0)&b4h) %>%
+    filter(is_antsL_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antL_last_b4h=Date-est_hatch) %>%
+  select(location, antL_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+ant_data <- ant_counts %>%
+  left_join(antP_last_b4h_data) %>%
+  left_join(antP_arrival_afh_data) %>%
+  left_join(antL_last_b4h_data) %>%
+  left_join(antL_arrival_afh_data)
+
+ant_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  select(location, ants_removed, females_removed, antL_arrival_afh)
+
+ant_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  ggplot(data=., aes(x=antL_arrival_afh)) +
+  geom_histogram()
+
+```
+
+There is no relationship between when ants arrive and hatching success or nymph survivial
+```{r}
+## No relationship between when ants arrive and hatching success or nymph survivial
+ant_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  ggplot(data=., aes(x=antL_arrival_afh, y=n_hatched/med_t5eggs)) +
+  geom_point()
+
+ant_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  ggplot(data=., aes(x=antL_arrival_afh, y=n_survived/n_hatched)) +
+  geom_point()
+```
+
+# plotting all ant counts over time
+- Was ant exclusion effective in eliminating ants? Reducing ants?
+- Are there any criteria for changing which clutches should be considered as "with ants" vs. "without ants"?
+- How can I demonstrate a causal arrow from moms -> ants rather than the other way?
+- Is there any way to predict maternal behavior based on ant attendance?
+- Can I decouple ant attendance and maternal care to predict survivorship?
+```{r}
+# when were the break-through events?
+ants_days_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(n_antsP=sum(ants_P,na.rm=T),
+           mean_antsP=mean(ants_P,na.rm=T),
+           med_antsP=median(ants_P,na.rm=T),
+           ever_antsP=n_antsP>0,
+           n_days_antsP=sum(ants_P>0,na.rm=T)) %>% ungroup() %>%
+  arrange(desc(n_antsP))
+```
+
+
+```{r}
+##### Ants on plant
+# date-est_hatch, ordered by last_desertion date rel to hatch
+(ant_days_p1 <- ants_days_data %>% # ants control, females control
+  right_join(latest_desertions) %>%
+  filter(!ants_removed, !females_removed) %>%
+  mutate(ants_P=ifelse(ants_P==0,NA,ants_P)) %>%
+ggplot(data=, aes(y=reorder(location,desc(last_des_rel2h)),x=Date-est_hatch, color=ants_P)) +
+  geom_point(size=0.25) +
+  geom_point(aes(y=reorder(location,desc(last_des_rel2h)), x=last_des_rel2h+1), shape=4, size=0.75, color="black") +
+  scale_colour_distiller(name = "n ants on plant", na.value="grey95", 
+                         breaks=c(1,2,4,8,16,32,64), limits=c(1,64),
+                         palette="Oranges", direction=+1, trans="log") +
+  theme_classic() +
+  theme(axis.line.y = element_blank(),
+        axis.text.y = element_blank(), axis.title.y = element_blank(), axis.ticks.y = element_blank()) +
+  xlim(-40,60) +
+  xlab("Date relative to hatch"))
+
+# *** this one demonstrates how removing mothers leads to fewer ants on the plant
+# but how can I show this statistically?
+(ant_days_p2 <- ants_days_data %>%  # ants control, females removed
+  right_join(latest_desertions) %>%
+  filter(!ants_removed, females_removed) %>%
+  mutate(ants_P=ifelse(ants_P==0,NA,ants_P)) %>%
+ggplot(data=, aes(y=reorder(location,desc(last_des_rel2h)),x=Date-est_hatch, color=ants_P)) +
+  geom_point(size=0.25) +
+  geom_point(aes(y=reorder(location,desc(last_des_rel2h)), x=last_des_rel2h+1), shape=4, size=0.75, color="black") +
+  scale_colour_distiller(name = "n ants on plant", na.value="grey95", 
+                         breaks=c(1,2,4,8,16,32,64), limits=c(1,64),
+                         palette="Oranges", direction=+1, trans="log") +
+  theme_classic() +
+  theme(axis.line.y = element_blank(),
+        axis.text.y = element_blank(), axis.title.y = element_blank(), axis.ticks.y = element_blank()) +
+  xlim(-40,60) +
+  xlab("Date relative to hatch"))
+
+(ant_days_p3 <- ants_days_data %>% # ants removed, females control
+  right_join(latest_desertions) %>%
+  filter(ants_removed, !females_removed) %>%
+  mutate(ants_P=ifelse(ants_P==0,NA,ants_P)) %>%
+ggplot(data=, aes(y=reorder(location,desc(last_des_rel2h)),x=Date-est_hatch, color=ants_P)) +
+  geom_point(size=0.25) +
+  geom_point(aes(y=reorder(location,desc(last_des_rel2h)), x=last_des_rel2h+1), shape=4, size=0.75, color="black") +
+  scale_colour_distiller(name = "n ants on plant", na.value="grey95", 
+                         breaks=c(1,2,4,8,16,32,64), limits=c(1,64),
+                         palette="Oranges", direction=+1, trans="log") +
+  theme_classic() +
+  theme(axis.line.y = element_blank(),
+        axis.text.y = element_blank(), axis.title.y = element_blank(), axis.ticks.y = element_blank()) +
+  xlim(-40,60) +
+  xlab("Date relative to hatch"))
+
+(ant_days_p4 <- ants_days_data %>% # ants removed, females removed
+  right_join(latest_desertions) %>%
+  filter(ants_removed, females_removed) %>%
+  mutate(ants_P=ifelse(ants_P==0,NA,ants_P)) %>%
+ggplot(data=, aes(y=reorder(location,desc(last_des_rel2h)),x=Date-est_hatch, color=ants_P)) +
+  geom_point(size=0.25) +
+  geom_point(aes(y=reorder(location,desc(last_des_rel2h)), x=last_des_rel2h+1), shape=4, size=0.75, color="black") +
+  scale_colour_distiller(name = "n ants on plant", na.value="grey95", 
+                         breaks=c(1,2,4,8,16,32,64), limits=c(1,64),
+                         palette="Oranges", direction=+1, trans="log") +
+  theme_classic() +
+  theme(axis.line.y = element_blank(),
+        axis.text.y = element_blank(), axis.title.y = element_blank(), axis.ticks.y = element_blank()) +
+  xlim(-40,60) +
+  xlab("Date relative to hatch"))
+
+(ant_days_plant.p.final <- ggpubr::ggarrange(labels=c("A","B","C","D"),
+                  ant_days_p1, ant_days_p2, ant_days_p3, ant_days_p4,
+                  ncol=2, nrow=2, common.legend=T, legend="bottom"))
+
+# ggsave("CHAPTER/ant_days_plant.final.png",
+#        ant_days_plant.p.final,
+#        device = "png",
+#        width = 200, height = 200, units = "mm", dpi = "print")
+
+```
+
+I shouldn't use ants on leaf because nymphs emigrate from the natal leaf.
+
+
+These plots make me think that including females_removed in the regressions might not be appropriate, since for some reason (sampling bias?) clutches were attended more consistently in the females removal dorms than in the control dorms. You can see this from how consistently females were attended in their first several days of guarding and after hatching.
+
+Does ant attendance in the first few days predict ant attendance after hatching better than desertion date?
+
+Does removing females reduce the number of ants at the clutch?
+```{r}
+ants_before_after_p1.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  mutate(last_des_date = est_hatch+last_des_rel2h) %>%
+  filter((Date<=(last_des_date+4))&(Date>=(last_des_date-4))) %>%
+  filter(Date!=(last_des_date-3), Date!=(last_des_date-1)) %>% #fix higher sampling rate before removal
+  group_by(location) %>%
+  filter(any((Date==(last_des_date-4)))&any(Date==(last_des_date-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-last_des_date), 
+                          breaks=c(-5,-3,-1,0,2,4), labels=c("-4","-2","0","2","4"))) %>%
+  ungroup()
+
+(ants_before_after_p1.p <- ants_before_after_p1.data  %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"unattended","attended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after female removal") +
+  ylab("Proportion of clutches") +
+  xlab("Days since female removal"))
+
+table(mutate(ants_before_after_p1.data, ants=ants_L>0)$ants,
+        ants_before_after_p1.data$before_after)
+
+table(mutate(ants_before_after_p1.data, ants=ants_L>0)$ants,
+        ants_before_after_p1.data$before_after) %>%
+  chisq.test()
+```
+
+Do ants come back at hatch after removing females?
+```{r}
+ants_before_after_p2.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  filter((Date<=(est_hatch+4))&(Date>=(est_hatch-4))) %>%
+  filter(Date!=(est_hatch-3), Date!=(est_hatch-1)) %>% #fix higher sampling rate before removal
+  group_by(location) %>%
+  filter(any((Date==(est_hatch-4)))&any(Date==(est_hatch-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-est_hatch), 
+                          breaks=c(-5,-3,-1,0,2,4), labels=c("-4","-2","0","2","4"))) %>%
+  ungroup()
+
+(ants_before_after_p2.p <- ants_before_after_p2.data %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"unattended","attended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (females removed)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+
+table(mutate(ants_before_after_p2.data, ants=ants_L>0)$ants,
+        ants_before_after_p2.data$before_after)
+
+table(mutate(ants_before_after_p2.data, ants=ants_L>0)$ants,
+        ants_before_after_p2.data$before_after) %>%
+  chisq.test()
+```
+
+How do different relative desertion times affect how likely a clutch is to be attended in the days before and after hatch?
+```{r}
+# desert, eggs, nymphs
+ants_before_after_p3.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, last_des_rel2h<=-4) %>%
+  filter((Date<=(est_hatch+4))&(Date>=(est_hatch-4))) %>%
+  group_by(location) %>%
+  filter(any((Date==(est_hatch-4)))&any(Date==(est_hatch-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-est_hatch), 
+                          breaks=c(-5,-3,-1,0,2,4), labels=c("-4","-2","0","2","4"))) %>%
+  ungroup()
+
+(ants_before_after_p3.p <- ants_before_after_p3.data %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"unattended","attended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (last desert early)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+
+table(mutate(ants_before_after_p3.data, ants=ants_L>0)$ants,
+        ants_before_after_p3.data$before_after)
+
+table(mutate(ants_before_after_p3.data, ants=ants_L>0)$ants,
+        ants_before_after_p3.data$before_after) %>%
+  chisq.test()
+
+(ants_before_after_p4 <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, last_des_rel2h>-4, last_des_rel2h<=4) %>%
+  group_by(location) %>%
+  filter((Date<=(est_hatch+4))&(Date>=(est_hatch-4))) %>%
+  mutate(last_des_date = est_hatch+last_des_rel2h,
+         before_after=cut(as.numeric(Date-last_des_date), 
+                          breaks=c(-5,-3,-1,0,2,4), labels=c("-4","-2","0","2","4"))) %>%
+  ungroup() %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"unattended","attended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (last desert eggs)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+
+(ants_before_after_p5 <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, last_des_rel2h>4) %>%
+  group_by(location) %>%
+  filter((Date<=(est_hatch+4))&(Date>=(est_hatch-4))) %>%
+  mutate(last_des_date = est_hatch+last_des_rel2h,
+         before_after=cut(as.numeric(Date-last_des_date), 
+                          breaks=c(-5,-3,-1,0,2,4), labels=c("-4","-2","0","2","4"))) %>%
+  ungroup() %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"unattended","attended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (last desert nymphs)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+```
+FUUUUUUUUCKKKKK!!!!!!!!!!!!
+Removing a mother results in a decrease in the probability of the clutch being attended by ants in the four days following removal ().
+```{r}
+ants_before_after_p1.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  mutate(last_des_date = est_hatch+last_des_rel2h) %>%
+  filter((Date<=(last_des_date+4))&(Date>=(last_des_date-2))) %>%
+  filter(Date!=(last_des_date-3), Date!=(last_des_date-1)) %>% #fix higher sampling rate before removal
+  group_by(location) %>%
+  filter(any(Date==(last_des_date-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-last_des_date), 
+                          breaks=c(-3,0,4), labels=c("4 days before removal", "4 days after removal"))) %>%
+  ungroup() %>%
+  select(location,Date, last_des_date, before_after, ants_L)
+
+(ants_before_after_p1.p <- ants_before_after_p1.data  %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"attended","unattended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after female removal") +
+  ylab("Proportion of clutches"))
+
+table(mutate(ants_before_after_p1.data, ants=ants_L>0)$ants,
+        ants_before_after_p1.data$before_after)
+
+table(mutate(ants_before_after_p1.data, ants=ants_L>0)$ants,
+        ants_before_after_p1.data$before_after) %>%
+  fisher.test()
+```
+
+But hatching leads to a relative increase in the likelihood of being attended by ants (although not all clutches are attended).
+```{r}
+ants_before_after_p2.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  filter((Date<=(est_hatch+2))&(Date>=(est_hatch-4))) %>%
+  filter(Date!=(est_hatch-3), Date!=(est_hatch-1)) %>% #fix higher sampling rate before removal
+  group_by(location) %>%
+  filter(any((Date==(est_hatch-4)))&any(Date==(est_hatch-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-est_hatch), 
+                          breaks=c(-5,0,2), labels=c("4 days before hatch", "4 days after hatch"))) %>%
+  ungroup() %>%
+  select(location,Date, est_hatch, before_after, ants_L)
+
+(ants_before_after_p2.p <- ants_before_after_p2.data  %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"attended","unattended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (females removed)") +
+  ylab("Proportion of clutches"))
+
+table(mutate(ants_before_after_p2.data, ants=ants_L>0)$ants,
+        ants_before_after_p2.data$before_after)
+
+table(mutate(ants_before_after_p2.data, ants=ants_L>0)$ants,
+        ants_before_after_p2.data$before_after) %>%
+  fisher.test()
+```
+
+early deserter have low chance of being visited by ants in the 4 days before and after hatching (25% across the board)
+```{r}
+# desert, eggs, nymphs
+ants_before_after_p3.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, last_des_rel2h<=-4) %>%
+  filter((Date<=(est_hatch+2))&(Date>=(est_hatch-4))) %>%
+  filter(Date!=(est_hatch-3), Date!=(est_hatch-1)) %>% #fix higher sampling rate before removal
+  group_by(location) %>%
+  filter(any((Date==(est_hatch-4)))&any(Date==(est_hatch-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-est_hatch), 
+                          breaks=c(-5,0,2), labels=c("4 days before hatch", "4 days after hatch"))) %>%
+  ungroup() %>%
+  select(location,Date, est_hatch, before_after, ants_L)
+
+(ants_before_after_p3.p <- ants_before_after_p3.data %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"attended","unattended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (last desert early)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+
+table(mutate(ants_before_after_p3.data, ants=ants_L>0)$ants,
+        ants_before_after_p3.data$before_after)
+
+table(mutate(ants_before_after_p3.data, ants=ants_L>0)$ants,
+        ants_before_after_p3.data$before_after) %>%
+  chisq.test()
+```
+
+egg guarders have high chance of being visited by ants (about 60% across the board)
+```{r}
+ants_before_after_p4.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, last_des_rel2h>-4, last_des_rel2h<=4) %>%
+  filter((Date<=(est_hatch+2))&(Date>=(est_hatch-4))) %>%
+  filter(Date!=(est_hatch-3), Date!=(est_hatch-1)) %>% #fix higher sampling rate before removal
+  group_by(location) %>%
+  filter(any((Date==(est_hatch-4)))&any(Date==(est_hatch-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-est_hatch), 
+                          breaks=c(-5,0,2), labels=c("4 days before hatch", "4 days after hatch"))) %>%
+  ungroup() %>%
+  select(location,Date, est_hatch, before_after, ants_L)
+
+(ants_before_after_p4.p <- ants_before_after_p4.data %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"attended","unattended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (last desert early)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+
+table(mutate(ants_before_after_p4.data, ants=ants_L>0)$ants,
+        ants_before_after_p4.data$before_after)
+
+table(mutate(ants_before_after_p4.data, ants=ants_L>0)$ants,
+        ants_before_after_p4.data$before_after) %>%
+  chisq.test()
+```
+
+nymph guarders have low chance of being visited by ants at or after hatching (20%), but not worse on the 4th day before hatching (50%)
+```{r}
+ants_before_after_p5.data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, last_des_rel2h>4) %>%
+  filter((Date<=(est_hatch+2))&(Date>=(est_hatch-4))) %>%
+  filter(Date!=(est_hatch-3), Date!=(est_hatch-1)) %>% #fix higher sampling rate before removal
+  group_by(location) %>%
+  filter(any((Date==(est_hatch-4)))&any(Date==(est_hatch-2))) %>% # remove any clutches where there are missing data before des
+  mutate(before_after=cut(as.numeric(Date-est_hatch), 
+                          breaks=c(-5,0,2), labels=c("4 days before hatch", "4 days after hatch"))) %>%
+  ungroup() %>%
+  select(location,Date, est_hatch, before_after, ants_L)
+
+(ants_before_after_p5.p <- ants_before_after_p5.data %>%
+  count(before_after, ants_L>0) %>%
+  ggplot(data=., aes(x=before_after, y=n, fill=ifelse(`ants_L > 0`,"attended","unattended"))) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (last desert early)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+
+table(mutate(ants_before_after_p5.data, ants=ants_L>0)$ants,
+        ants_before_after_p5.data$before_after)
+
+table(mutate(ants_before_after_p5.data, ants=ants_L>0)$ants,
+        ants_before_after_p5.data$before_after) %>%
+  chisq.test()
+```
+
+Clutches guarded until hatching were more likely to be attended by ants within the first 4 days after hatching than those deserted early (Fisher's Exact Test p = 0.008, odds ratio = 3.988299).
+```{r}
+ants_before_after.data.eggs.afterH <- ants_before_after_p3.data %>%
+  filter(before_after == "4 days after hatch") %>%
+  mutate(ants=ifelse(ants_L>0, "attended","unattended"), desert="eggs")
+
+ants_before_after.data.early.afterH <- ants_before_after_p4.data %>%
+  filter(before_after == "4 days after hatch") %>%
+  mutate(ants=ifelse(ants_L>0, "attended","unattended"), desert="early")
+
+ants_before_after.data.eggsVSearly <- rbind(ants_before_after.data.eggs.afterH,ants_before_after.data.early.afterH)
+
+(ants_before_after.eggsVSearly.p <- ants_before_after.data.eggsVSearly %>%
+  count(desert, ants) %>%
+  ggplot(data=., aes(x=desert, y=n, fill=ants)) +
+  geom_col(position="fill") +
+  ggtitle("Ants before and after hatching (last desert early)") +
+  ylab("Proportion of clutches") +
+  xlab("Days since hatch"))
+  
+
+table(ants_before_after.data.eggsVSearly$desert, ants_before_after.data.eggsVSearly$ants)
+
+table(ants_before_after.data.eggsVSearly$desert, ants_before_after.data.eggsVSearly$ants) %>%
+  fisher.test()
+```
+
+Using beta regression to do the same as above: How does the probability of being attended by ants change from the 4 days before the females is removed to the 4 days after?
+```{r}
+library(effects)
+
+B4orAF_fem_data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  select(location, Date, est_hatch, last_des_rel2h, ants_P) %>%
+  mutate(last_des_date=est_hatch+last_des_rel2h,
+         B4orAF_fem=ifelse((Date<=(last_des_date+4))&(Date>last_des_date), "4 after",
+                             ifelse((Date>=(last_des_date-2))&(Date<=last_des_date), "4 before",
+                                    NA))) %>%
+  filter(!is.na(B4orAF_fem)) %>%
+  #fix higher sampling rate before removal
+  filter(Date!=(last_des_date-3), Date!=(last_des_date-1)) %>%
+  group_by(location, B4orAF_fem) %>%
+    summarize(any_antsP = as.numeric(any(ants_P)),
+              n = n()) %>%
+  ungroup()# %>% 
+  #filter(n==2) # 4 clutches had too few/many obs bc females deserted before I removed them
+
+table(B4orAF_fem_data$B4orAF_fem, B4orAF_fem_data$any_antsP)
+
+B4orAF_fem.m <- glm(any_antsP ~ B4orAF_fem, data=B4orAF_fem_data, family="binomial")
+summary(B4orAF_fem.m)
+coef(B4orAF_fem.m) # log-odds ratio
+confint(B4orAF_fem.m) # log-odds ratio 95% confint
+exp(coef(B4orAF_fem.m)) # odds ratio, i.e. "the odds of being visited by ants 23 times higher after female removal than before"
+exp(confint(B4orAF_fem.m)) # odds ratio 95% confint: 8.4071654 75.7673129
+
+B4orAF_fem.predict <- predict(B4orAF_fem.m, 
+                              data.frame(any_antsP=c(TRUE,FALSE),B4orAF_fem=c("4 before", "4 after")),
+                              type="response", se.fit=TRUE)
+# prob of ants visiting before mother removed
+B4orAF_fem.predict$fit[1] # 88%
+B4orAF_fem.predict$fit[1]+B4orAF_fem.predict$se.fit[1]*1.96 # 95% confint upper: 97%
+B4orAF_fem.predict$fit[1]-B4orAF_fem.predict$se.fit[1]*1.96 # 95% confint lower: 79%
+# prob of ants visiting after mother removed
+B4orAF_fem.predict$fit[2] # 23%
+B4orAF_fem.predict$fit[2]+B4orAF_fem.predict$se.fit[2]*1.96 # 95% confint upper: 36%
+B4orAF_fem.predict$fit[2]-B4orAF_fem.predict$se.fit[2]*1.96 # 95% confint lower: 11%
+
+# png("CHAPTER/FigS1_B4orAF_fem.m.e.p.png", width=250, height=300)
+# plot(allEffects(B4orAF_fem.m, residuals=T))
+# dev.off()
+
+## same dataset (ants control, female removal) but testing effect of hatching on prob of ant attendance
+B4orAF_hatch_data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed, !is.na(hatch_date)) %>% # only interested in clutch that truly hatched
+  select(location, Date, hatch_date, last_des_rel2h, ants_P) %>%
+  mutate(B4orAF_hatch=ifelse((Date<=(hatch_date+3))&(Date>=hatch_date), "4 days after hatch",
+                             ifelse((Date>=(hatch_date-4))&(Date<hatch_date), "4 days before hatch",
+                                    NA))) %>%
+  filter(!is.na(B4orAF_hatch)) %>%
+  group_by(location, B4orAF_hatch) %>%
+    summarize(any_antsP = as.numeric(any(ants_P)),
+              n = n()) %>%
+  ungroup()
+
+table(B4orAF_hatch_data$any_antsP, B4orAF_hatch_data$B4orAF_hatch)
+
+B4orAF_hatch.m <- glm(any_antsP ~ B4orAF_hatch, data=B4orAF_hatch_data, family="binomial")
+summary(B4orAF_hatch.m)
+coef(B4orAF_hatch.m) # log-odds ratio
+confint(B4orAF_hatch.m) # log-odds ratio 95% confint
+exp(coef(B4orAF_hatch.m)) # odds ratio, i.e. "the odds of being visited by ants was 11% higher after hatching than before"
+exp(confint(B4orAF_hatch.m)) # odds ratio 95% confint: 8.4071654 75.7673129
+
+B4orAF_hatch.predict <- predict(B4orAF_hatch.m, 
+                              data.frame(B4orAF_hatch=c("4 days before hatch", "4 days after hatch")),
+                              type="response", se.fit=TRUE)
+# prob of ants visiting before hatch
+B4orAF_hatch.predict$fit[1] # 8.1%
+B4orAF_hatch.predict$fit[1]+B4orAF_hatch.predict$se.fit[1]*1.96 # 95% confint upper: 17%
+B4orAF_hatch.predict$fit[1]-B4orAF_hatch.predict$se.fit[1]*1.96 # 95% confint lower: -0.7% = 0%
+# prob of ants visiting after hatch
+B4orAF_hatch.predict$fit[2] # 48.6%
+B4orAF_hatch.predict$fit[2]+B4orAF_hatch.predict$se.fit[2]*1.96 # 95% confint upper: 65%
+B4orAF_hatch.predict$fit[2]-B4orAF_hatch.predict$se.fit[2]*1.96 # 95% confint lower: 33% 
+
+# png("CHAPTER/FigS2_B4orAF_hatch.m.e.png", width=250, height=300)
+# plot(allEffects(B4orAF_hatch.m, residuals=T))
+# dev.off()
+```
+
+I've been doing binomial regression for this, but is that necessary/appropriate?
+Is there a significant drop in the probability of ants visiting a clutch after female removal?
+Before and after data are not independent! They should be paired.
+"Exact McNemar's Test (with central confidence intervals)", report odds ratio as effect size
+```{r}
+library(exact2x2)
+
+B4orAF_fem_paired <- B4orAF_fem_data %>%
+  pivot_wider(id_cols = location,
+              names_from = B4orAF_fem,
+              values_from = any_antsP) %>%
+  select(location, before=`4 before`, after=`4 after`)
+
+B4orAF_fem_paired %>%
+  count(before, after)
+
+B4orAF_fem_paired %>%
+  count(before, after) %>%
+  pivot_wider(names_from = after,
+              names_prefix = "after_",
+              values_from = n,
+              values_fill = 0) # fill empty cells with '0'
+
+mcnemar.exact(B4orAF_fem_paired$before, B4orAF_fem_paired$after) 
+# p-value = 1.164e-10; odds ratio = 0
+
+### after hatch
+B4orAF_hatch_paired <- B4orAF_hatch_data %>%
+  pivot_wider(id_cols = location,
+              names_from = B4orAF_hatch,
+              values_from = any_antsP) %>%
+  select(location, before=`4 days before hatch`, after=`4 days after hatch`)
+
+B4orAF_hatch_paired %>%
+  count(before, after)
+
+B4orAF_hatch_paired %>%
+  count(before, after) %>%
+  pivot_wider(names_from = after,
+              names_prefix = "after_",
+              values_from = n,
+              values_fill = 0) # fill empty cells with '0'
+
+mcnemar.exact(B4orAF_hatch_paired$before, B4orAF_hatch_paired$after) 
+# p-value = 6.104e-05; odds ratio = Inf
+```
+
+
+In the control trial, all females that visited a clutch deserted before hatching but ants were sometimes nonetheless observed on the plant before the deserted clutch hatched. If freely moving females can make desertion decisions that minimize the chances of their eggs going unattended – for example, deserting only when other females are present on the plant and likely to remain after the deserting mother has left, or only deserting early if laying additional clutches on the same plant – then we would expect the drop in the probability of ants being attending before and after desertion to be lower in free-moving females that deserted on their own fruition than females that were forcibly removed. In X/X cases when the final , at least one female was present on the plant after desertion of the focal clutch and in X/X cases at least one female was present on the plant up until the focal clutch hatched.
+
+To test this prediction, we performed another binomial regression using only the data from control trial where females deserted at least four days before hatching to estimate the probability of ants visiting in the four days leading up to desertion vs. the four days following plus an additional explanatory variable representing whether a female was present elsewhere on the plant in the four days following the desertion of the focal clutch. 
+```{r}
+B4orAF_fem_des_data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, last_des_rel2h<=est_hatch-4) %>%
+  select(location, Date, est_hatch, last_des_rel2h, ants_P, DormPlant) %>%
+  mutate(last_des_date=est_hatch+last_des_rel2h,
+         B4orAF_fem=ifelse((Date<=(last_des_date+4))&(Date>last_des_date), "4 after",
+                             ifelse((Date>=(last_des_date-2))&(Date<=last_des_date), "4 before",
+                                    NA))) %>%
+  filter(!is.na(B4orAF_fem)) %>%
+  group_by(DormPlant) %>%
+    mutate(last_des_date_plant=max(last_des_date)) %>%
+  ungroup() %>%
+  group_by(location, B4orAF_fem) %>%
+    summarize(any_momsP = first((last_des_date_plant>last_des_date)),
+              any_momsP_4d = first((last_des_date_plant>last_des_date) &
+                                     (last_des_date_plant>=last_des_date+4)),
+              any_momsP_hatch = first((last_des_date_plant>last_des_date) &
+                                        (last_des_date_plant>=est_hatch)),
+              any_antsP = as.numeric(any(ants_P)),
+              n = n()) %>%
+  ungroup()
+
+B4orAF_fem_des_data %>% count(B4orAF_fem, any_antsP, any_momsP)
+B4orAF_fem_des_data %>% count(B4orAF_fem, any_antsP, any_momsP_4d)
+B4orAF_fem_des_data %>% count(B4orAF_fem, any_antsP, any_momsP_hatch)
+
+ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed) %>%
+  distinct(DormPlant, location, est_hatch, last_des_rel2h) %>%
+  mutate(last_des_date=est_hatch+last_des_rel2h) %>%
+  group_by(DormPlant) %>% mutate(last_des_date_plant=max(last_des_date)) %>% ungroup() %>%
+  group_by(location) %>%
+    summarize(deserted_4b4h = last_des_rel2h<=-4,
+              any_momsP = last_des_date_plant>last_des_date,
+              any_momsP_hatch = (last_des_date_plant>last_des_date) & (last_des_date_plant>=est_hatch),
+              n = n()) %>%
+  ungroup() %>%
+  count(deserted_4b4h, any_momsP_hatch)
+
+# any_antsP ~ B4orAF_fem*any_momsP_4d
+B4orAF_fem_des.m1 <- glm(any_antsP ~ B4orAF_fem*any_momsP_4d, data=B4orAF_fem_des_data, family="binomial")
+summary(B4orAF_fem_des.m1) # ns
+plot(allEffects(B4orAF_fem_des.m1, residuals=T))
+
+# any_antsP ~ B4orAF_fem*any_momsP_hatch
+B4orAF_fem_des.m2 <- glm(any_antsP ~ B4orAF_fem*any_momsP_hatch, data=B4orAF_fem_des_data, family="binomial")
+summary(B4orAF_fem_des.m2) # ns
+plot(allEffects(B4orAF_fem_des.m2, residuals=T))
+
+```
+
+
+```{r}
+## interaction with female guarding strategy in the double control dataset?
+B4orAF_hatch_data <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed) %>%
+  select(location, Date, est_hatch, last_des_rel2h, ants_P) %>%
+  mutate(strat=ifelse(last_des_rel2h<=-16, "desert",
+                      ifelse(last_des_rel2h>-16 & last_des_rel2h<=4, "eggs",
+                             ifelse(last_des_rel2h>4, "nymphs", NA))),
+         B4orAF_hatch=ifelse((Date<=(est_hatch+3))&(Date>=est_hatch), "4 days after hatch",
+                             ifelse((Date>=(est_hatch-4))&(Date<est_hatch), "4 days before hatch",
+                                    NA))) %>%
+  filter(!is.na(B4orAF_hatch)) %>%
+  group_by(location, B4orAF_hatch) %>%
+    summarize(strat=first(strat),
+              any_antsP = as.numeric(any(ants_P)),
+              n = n()) %>%
+  ungroup() %>% 
+  # why do two clutches have n=1?
+  filter(n==2, !is.na(strat))
+
+table(B4orAF_hatch_data$any_antsP, B4orAF_hatch_data$B4orAF_hatch, B4orAF_hatch_data$strat)
+
+# interaction term not significant; AIC=267.8
+B4orAF_hatch.mai <- glm(any_antsP ~ B4orAF_hatch*strat, data=B4orAF_hatch_data,
+                      family=binomial)
+summary(B4orAF_hatch.mai)
+plot(allEffects(B4orAF_hatch.mai))
+
+# without interaction term, strat=eggs becomes significant; AIC=264.73
+B4orAF_hatch.ma <- glm(any_antsP ~ B4orAF_hatch+strat, data=B4orAF_hatch_data,
+                      family=binomial)
+summary(B4orAF_hatch.ma)
+plot(allEffects(B4orAF_hatch.ma))
+
+B4orAF_hatch.ma.e <- allEffects(B4orAF_hatch.ma)
+B4orAF_hatch.ma.e$strat$model.matrix
+
+# using predict with new data to check figure
+ndata <- data.frame(B4orAF_hatch=factor(c(rep("4 days before hatch",3),rep("4 days after hatch",3))),
+                    strat=factor(c("desert","eggs","nymphs")))
+predict(object = B4orAF_hatch.ma, newdata = ndata, type = "response")
+
+# drop in deviance
+anova(B4orAF_hatch.mai, B4orAF_hatch.ma, test = "Chisq") # ns
+
+# make the effect plot look better (can't figure this out, use default, try later)
+# plot(allEffects(B4orAF_hatch.ma))
+# #library(ggeffects)
+# B4orAF_hatch.ma.pred <- ggpredict(B4orAF_hatch.ma)
+# plot(B4orAF_hatch.ma.pred)
+# B4orAF_hatch.ma.e.p <- plot(allEffects(B4orAF_hatch.ma))
+
+# png("CHAPTER/B4orAF_hatch.ma.e.p.png", width=500, height=300)
+# plot(allEffects(B4orAF_hatch.mai))
+# dev.off()
+```
+
+## How does the presence of ants before/after hatching effect hatching success and nymph survivorship?
+female removal:
+hatch success ~ any ants 4 days before hatch*any ants 4 days after hatch
+```{r}
+B4orAF_hatch_surv_data_femrem <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, females_removed) %>%
+  select(location, Date, est_hatch, last_des_rel2h, ants_L, 
+         med_t5eggs, n_hatched, n_survived) %>%
+  mutate(strat=ifelse(last_des_rel2h<=-16, "desert",
+                      ifelse(last_des_rel2h>-16 & last_des_rel2h<=4, "eggs",
+                             ifelse(last_des_rel2h>4, "nymphs", NA))),
+         B4orAF_hatch=ifelse((Date<=(est_hatch+9))&(Date>=est_hatch), "10 days after hatch",
+                             ifelse((Date>=(est_hatch-10))&(Date<est_hatch), "10 days before hatch",
+                                    NA))) %>%
+  filter(!is.na(B4orAF_hatch)) %>%
+  group_by(location) %>%
+    summarize(strat=first(strat),
+              any_antsL_B4H=as.numeric(any(ants_L&(B4orAF_hatch=="10 days before hatch"))),
+              any_antsL_AFH=as.numeric(any(ants_L&(B4orAF_hatch=="10 days after hatch"))),
+              n=n(),
+              med_t5eggs=first(med_t5eggs), 
+              n_hatched=first(n_hatched), 
+              n_survived=ifelse(first(n_survived)/first(n_hatched)>1,
+                                1, first(n_survived))) %>%
+  ungroup() %>% 
+  # note that there are slight uneven sample sizes across clutches
+  filter(!is.na(strat), !is.na(n_hatched))
+
+
+ggplot(B4orAF_hatch_surv_data_femrem, 
+       aes(y=n_hatched/med_t5eggs, x=interaction(any_antsL_B4H,any_antsL_AFH),
+           color=interaction(any_antsL_B4H,any_antsL_AFH))) +
+  geom_violin() +
+  geom_jitter()
+
+B4orAF_hatch_surv_femrem.eggs.mai <- glm(n_hatched/med_t5eggs ~ any_antsL_B4H*any_antsL_AFH,
+                        data=B4orAF_hatch_surv_data_femrem,
+                        family=binomial, weight=med_t5eggs)
+summary(B4orAF_hatch_surv_femrem.eggs.mai)
+plot(allEffects(B4orAF_hatch_surv_femrem.eggs.mai))
+
+ggplot(B4orAF_hatch_surv_data_femrem, 
+       aes(y=n_survived/n_hatched, x=interaction(any_antsL_B4H,any_antsL_AFH),
+           color=interaction(any_antsL_B4H,any_antsL_AFH))) +
+  geom_violin() +
+  geom_jitter()
+
+B4orAF_hatch_surv_femrem.nymphs.mai <- glm(n_survived/n_hatched ~ any_antsL_AFH*any_antsL_B4H,
+                        data=B4orAF_hatch_surv_data_femrem,
+                        family=binomial, weight=n_hatched)
+summary(B4orAF_hatch_surv_femrem.nymphs.mai)
+plot(allEffects(B4orAF_hatch_surv_femrem.nymphs.mai))
+
+B4orAF_hatch_surv_femrem.nymphs.ma <- glm(n_survived/n_hatched ~ any_antsL_AFH+any_antsL_B4H,
+                        data=B4orAF_hatch_surv_data_femrem,
+                        family=binomial, weight=n_hatched)
+summary(B4orAF_hatch_surv_femrem.nymphs.ma)
+plot(allEffects(B4orAF_hatch_surv_femrem.nymphs.ma))
+```
+
+
+all data:
+hatch success ~ any ants 10 days before hatch * any ants 10 days after hatch * strat
+```{r}
+B4orAF_hatch_surv_data_all <- ants_days_data %>% # ants removed, females removed
+  left_join(clutch_survivorship_data) %>%
+  select(location, Date, est_hatch, last_des_rel2h, ants_L, ants_P,
+         med_t5eggs, n_hatched, n_survived) %>%
+  mutate(strat=ifelse(last_des_rel2h<=-16, "desert",
+                      ifelse(last_des_rel2h>-16 & last_des_rel2h<=4, "eggs",
+                             ifelse(last_des_rel2h>4, "nymphs", NA))),
+         B4orAF_hatch=ifelse((Date<=(est_hatch+9))&(Date>=est_hatch), "10 days after hatch",
+                             ifelse((Date>=(est_hatch-10))&(Date<est_hatch), "10 days before hatch",
+                                    NA))) %>%
+  filter(!is.na(B4orAF_hatch)) %>%
+  group_by(location) %>%
+    summarize(strat=first(strat),
+              any_antsP_B4H=factor(any(ants_P&(B4orAF_hatch=="10 days before hatch"))),
+              any_antsP_AFH=factor(any(ants_P&(B4orAF_hatch=="10 days after hatch"))),
+              n=n(),
+              med_t5eggs=first(med_t5eggs), 
+              n_hatched=first(n_hatched), 
+              n_survived=ifelse(first(n_survived)/first(n_hatched)>1,
+                                1, first(n_survived))) %>%
+  ungroup() %>% 
+  # note that there are slight uneven sample sizes across clutches
+  filter(!is.na(strat), !is.na(n_hatched))
+
+ggplot(B4orAF_hatch_surv_data_all, 
+       aes(y=n_hatched/med_t5eggs, x=interaction(any_antsP_B4H,any_antsP_AFH),
+           color=interaction(any_antsP_B4H,any_antsP_AFH))) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~strat)
+
+B4orAF_hatch_surv_all.eggs.mai <- glm(n_hatched/med_t5eggs ~
+                                        any_antsP_B4H*any_antsP_AFH*strat,
+                        data=B4orAF_hatch_surv_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_surv_all.eggs.mai)
+plot(Effect(focal.predictors=c("any_antsP_B4H","any_antsP_AFH", "strat"), residuals=T,
+            mod=B4orAF_hatch_surv_all.eggs.mai))
+plot(Effect(focal.predictors=c("strat"), residuals=T,
+            mod=B4orAF_hatch_surv_all.eggs.mai))
+```
+
+all data:
+nymph survivorship ~ any ants 4 days before hatch*any ants 4 days after hatch*strat
+```{r}
+ggplot(B4orAF_hatch_surv_data_all, 
+       aes(y=n_survived/n_hatched, x=interaction(any_antsP_B4H,any_antsP_AFH),
+           color=interaction(any_antsP_B4H,any_antsP_AFH))) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~strat)
+
+B4orAF_hatch_surv_all.nymphs.mai <- glm(n_survived/n_hatched ~
+                                        any_antsP_B4H*any_antsP_AFH*strat,
+                        data=B4orAF_hatch_surv_data_all,
+                        family=quasibinomial, weight=n_hatched)
+summary(B4orAF_hatch_surv_all.nymphs.mai)
+plot(Effect(focal.predictors=c("any_antsP_AFH"),
+            mod=B4orAF_hatch_surv_all.nymphs.mai, residuals=TRUE))
+plot(Effect(focal.predictors=c("any_antsP_AFH", "strat"),
+            mod=B4orAF_hatch_surv_all.nymphs.mai, residuals=TRUE))
+plot(Effect(focal.predictors=c("any_antsP_B4H", "strat"),
+            mod=B4orAF_hatch_surv_all.nymphs.mai, residuals=TRUE))
+plot(Effect(focal.predictors=c("any_antsP_AFH", "any_antsP_B4H"),
+            mod=B4orAF_hatch_surv_all.nymphs.mai, residuals=TRUE))
+```
+
+all data:
+egg survivorship ~ any ants 4 days before hatch*any ants 4 days after hatch*strat
+```{r}
+ggplot(B4orAF_hatch_surv_data_all, 
+       aes(y=n_survived/med_t5eggs, x=interaction(any_antsP_B4H,any_antsP_AFH),
+           color=interaction(any_antsP_B4H,any_antsP_AFH))) +
+  geom_boxplot() +
+  geom_jitter() +
+  facet_wrap(~strat)
+
+B4orAF_hatch_surv_all.Esurv.mai <- glm(n_survived/med_t5eggs ~
+                                        any_antsP_B4H*any_antsP_AFH*strat,
+                        data=B4orAF_hatch_surv_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_surv_all.Esurv.mai)
+plot(Effect(focal.predictors=c("any_antsP_AFH"),
+            mod=B4orAF_hatch_surv_all.Esurv.mai, residuals=TRUE))
+plot(Effect(focal.predictors=c("any_antsP_AFH", "strat"),
+            mod=B4orAF_hatch_surv_all.Esurv.mai, residuals=TRUE))
+plot(Effect(focal.predictors=c("any_antsP_AFH", "any_antsP_B4H"),
+            mod=B4orAF_hatch_surv_all.Esurv.mai, residuals=TRUE))
+```
+
+### quickly seeing whether adding proportion of days ants attended is helpful
+```{r}
+B4orAF_hatch_propAnts_data_all_unfilt <- ants_days_data %>%
+  left_join(clutch_survivorship_data) %>%
+  select(location, Date, est_hatch, last_des_rel2h, `visited in 4 days`, ants_L, ants_P,
+         med_t5eggs, n_hatched, n_survived) %>%
+  mutate(strat=ifelse(last_des_rel2h<=-16, "desert",
+                      ifelse(last_des_rel2h>-16 & last_des_rel2h<=4, "eggs",
+                             ifelse(last_des_rel2h>4, "nymphs", NA))),
+         B4orAF_hatch=ifelse((Date<=(est_hatch+9))&(Date>=est_hatch), "10 days after hatch",
+                             ifelse((Date>=(est_hatch-10))&(Date<est_hatch), "10 days before hatch",
+                                    NA))) %>%
+  filter(!is.na(B4orAF_hatch)) %>%
+  group_by(location) %>%
+    summarize(last_des_rel2h=first(last_des_rel2h),
+              vis=first(factor(`visited in 4 days`)),
+              strat=first(strat),
+              any_antsP_B4H=factor(any(ants_P&(B4orAF_hatch=="10 days before hatch"))),
+              any_antsP_AFH=factor(any(ants_P&(B4orAF_hatch=="10 days after hatch"))),
+              prop_ants_B4H=ifelse(any_antsP_B4H=="TRUE",
+                                   sum(ants_P&(B4orAF_hatch=="10 days before hatch"))/
+                                     sum(B4orAF_hatch=="10 days before hatch"),
+                                   0),
+              prop_ants_AFH=ifelse(any_antsP_AFH=="TRUE",
+                                   sum(ants_P&(B4orAF_hatch=="10 days after hatch"))/
+                                     sum(B4orAF_hatch=="10 days after hatch"),
+                                   0),
+              n=n(),
+              med_t5eggs=first(med_t5eggs), 
+              n_hatched=first(n_hatched), 
+              n_survived=ifelse(first(n_survived)/first(n_hatched)>1,
+                                1, first(n_survived))) %>%
+  ungroup()
+
+B4orAF_hatch_propAnts_data_all <- B4orAF_hatch_propAnts_data_all_unfilt %>% 
+  # note that there are slight uneven sample sizes across clutches
+  filter(!is.na(strat), !is.na(n_hatched), n>=8, n<=13)
+
+ggplot(B4orAF_hatch_propAnts_data_all) +
+  geom_point(aes(y=n_hatched/med_t5eggs, x=prop_ants_B4H)) +
+  geom_smooth(aes(y=n_hatched/med_t5eggs, x=prop_ants_B4H), method=lm) +
+  facet_wrap(~strat)
+
+ggplot(B4orAF_hatch_propAnts_data_all) +
+  geom_point(aes(y=n_hatched/med_t5eggs, x=prop_ants_AFH)) +
+  geom_smooth(aes(y=n_hatched/med_t5eggs, x=prop_ants_AFH), method=lm) +
+  facet_wrap(~strat)
+
+B4orAF_hatch_propAnts_all.eggs.mai <- glm(n_hatched/med_t5eggs ~
+                                          strat*prop_ants_B4H*prop_ants_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_propAnts_all.eggs.mai)
+plot(Effect(focal.predictors=c("strat"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.eggs.mai))
+
+
+B4orAF_hatch_propAnts_all.nymphs.mai <- glm(n_survived/n_hatched ~
+                                          strat*prop_ants_B4H*prop_ants_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=n_hatched)
+summary(B4orAF_hatch_propAnts_all.nymphs.mai)
+plot(Effect(focal.predictors=c("strat"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.mai))
+plot(Effect(focal.predictors=c("prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.mai))
+plot(Effect(focal.predictors=c("strat", "prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.mai))
+
+
+B4orAF_hatch_propAnts_all.Esurv.mai <- glm(n_survived/med_t5eggs ~
+                                          strat*prop_ants_B4H*prop_ants_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_propAnts_all.Esurv.mai)
+plot(Effect(c("strat"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.Esurv.mai))
+plot(Effect(c("strat", "prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.Esurv.mai))
+
+```
+
+#### using three continuous predictors
+Plotting with residuals reveals poor model fit, plus AIC is much higher than binned. I think there are too many colinearities/confounding trends to make this work.
+```{r}
+xlevels_props<-list(last_des_rel2h=c(-20,0,20),
+                             prop_ants_B4H=c(0,0.5,1),
+                             prop_ants_AFH=c(0,0.5,1))
+
+B4orAF_hatch_propAnts_all.eggs.lastdes.mai <- glm(n_hatched/med_t5eggs ~
+                                          last_des_rel2h*prop_ants_B4H*prop_ants_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_propAnts_all.eggs.lastdes.mai)
+plot(Effect(focal.predictors=c("last_des_rel2h"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.eggs.lastdes.mai, xlevels=xlevels_props))
+
+B4orAF_hatch_propAnts_all.nymphs.lastdes.mai <- glm(n_survived/n_hatched ~ last_des_rel2h*prop_ants_B4H*prop_ants_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=n_hatched)
+summary(B4orAF_hatch_propAnts_all.nymphs.lastdes.mai)
+plot(Effect(focal.predictors=c("last_des_rel2h"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.mai, xlevels=xlevels_props))
+
+B4orAF_hatch_propAnts_all.Esurv.lastdes.mai <- glm(n_survived/med_t5eggs ~
+                                          last_des_rel2h*prop_ants_B4H*prop_ants_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_propAnts_all.Esurv.lastdes.mai)
+plot(Effect(c("last_des_rel2h"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.Esurv.lastdes.mai, xlevels=xlevels_props))
+plot(Effect(c("prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.Esurv.lastdes.mai, xlevels=xlevels_props))
+plot(Effect(c("last_des_rel2h", "prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.Esurv.lastdes.mai, xlevels=xlevels_props))
+
+```
+
+last des but any ants
+```{r}
+B4orAF_hatch_all.eggs.lastdes.mai <- glm(n_hatched/med_t5eggs ~
+                                          last_des_rel2h*any_antsP_B4H*any_antsP_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+plot(Effect(focal.predictors=c("any_antsP_AFH"), residuals=T,
+            mod=B4orAF_hatch_all.eggs.lastdes.mai, xlevels=xlevels_props))
+
+B4orAF_hatch_all.nymphs.lastdes.mai <- glm(n_survived/n_hatched ~
+                                          last_des_rel2h*any_antsP_B4H*any_antsP_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=n_hatched)
+summary(B4orAF_hatch_all.nymphs.lastdes.mai)
+plot(Effect(focal.predictors=c("any_antsP_AFH"), residuals=T,
+            mod=B4orAF_hatch_all.nymphs.lastdes.mai, xlevels=xlevels_props))
+
+B4orAF_hatch_all.Esurv.lastdes.mai <- glm(n_survived/med_t5eggs ~
+                                          last_des_rel2h*any_antsP_B4H*any_antsP_AFH,
+                        data=B4orAF_hatch_propAnts_data_all,
+                        family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_all.Esurv.lastdes.mai)
+plot(Effect(focal.predictors=c("any_antsP_AFH"), residuals=T,
+            mod=B4orAF_hatch_all.Esurv.lastdes.mai, xlevels=xlevels_props))
+```
+
+
+### trying again with visited in 4 days
+
+```{r}
+ggplot(B4orAF_hatch_propAnts_data_all) +
+  geom_point(aes(y=n_hatched/med_t5eggs, x=prop_ants_B4H)) +
+  geom_smooth(aes(y=n_hatched/med_t5eggs, x=prop_ants_B4H), method=lm) +
+  facet_wrap(vars(strat,vis))
+
+ggplot(B4orAF_hatch_propAnts_data_all) +
+  geom_point(aes(y=n_hatched/med_t5eggs, x=prop_ants_AFH)) +
+  geom_smooth(aes(y=n_hatched/med_t5eggs, x=prop_ants_AFH), method=lm) +
+  facet_wrap(vars(strat,vis))
+
+B4orAF_hatch_propAnts_all.eggs.lastdes.vis.mai <- 
+  glm(n_hatched/med_t5eggs ~ last_des_rel2h + prop_ants_B4H + prop_ants_AFH +
+        prop_ants_B4H:last_des_rel2h + prop_ants_AFH:last_des_rel2h +
+        prop_ants_B4H:prop_ants_AFH +
+        vis + vis:last_des_rel2h + 
+        vis:last_des_rel2h:prop_ants_B4H + vis:last_des_rel2h:prop_ants_AFH +
+        vis:prop_ants_B4H + vis:prop_ants_AFH,
+      data=B4orAF_hatch_propAnts_data_all,
+      family=quasibinomial, weight=med_t5eggs)
+summary(B4orAF_hatch_propAnts_all.eggs.lastdes.vis.mai)
+xlevels_props<-list(last_des_rel2h=c(-20,0,20),
+                    prop_ants_B4H=c(0,0.5,1),
+                    prop_ants_AFH=c(0,0.5,1))
+plot(allEffects(B4orAF_hatch_propAnts_all.eggs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.eggs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("prop_ants_AFH","vis"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.eggs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("last_des_rel2h", "prop_ants_B4H"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.eggs.lastdes.vis.mai, xlevels=xlevels_props))
+
+B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai <- 
+  glm(n_survived/n_hatched ~ last_des_rel2h + prop_ants_B4H + prop_ants_AFH +
+        prop_ants_B4H:last_des_rel2h + prop_ants_AFH:last_des_rel2h +
+        prop_ants_B4H:prop_ants_AFH +
+        vis + vis:last_des_rel2h +
+        vis:prop_ants_B4H + vis:prop_ants_AFH,
+      data=B4orAF_hatch_propAnts_data_all,
+      family=binomial, weight=n_hatched)
+summary(B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai)
+xlevels_props<-list(last_des_rel2h=c(-20,0,20),
+                    prop_ants_B4H=c(0,0.5,1),
+                    prop_ants_AFH=c(0,0.5,1))
+
+plot(Effect(focal.predictors=c("prop_ants_B4H"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("vis"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+
+plot(Effect(focal.predictors=c("last_des_rel2h", "prop_ants_B4H"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("last_des_rel2h", "prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("last_des_rel2h"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("vis"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("vis", "last_des_rel2h"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("vis","last_des_rel2h", "prop_ants_B4H"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("vis","last_des_rel2h", "prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+plot(Effect(focal.predictors=c("prop_ants_B4H", "prop_ants_AFH"), residuals=T,
+            mod=B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai, xlevels=xlevels_props))
+```
+
+### comparing all these models
+Including the proportion of days in the 10 days before hatching ants visited the plant and the proportion of days in the 10 days after hatching ants visited the plant yields only one significant term in the model, the latest date desertion relative to hatching for hatching success, nymph survival and survival of eggs. However, this model performs as well as or better than the model representing ant attendance simply by ant exclusion treatment at the task of predicting the actual survivorship measures ("imputation" figures).
+```{r}
+summary(B4orAF_hatch_surv_all.eggs.mai) # all ns >0.05
+summary(B4orAF_hatch_propAnts_all.eggs.lastdes.mai) # last_des_rel2h*
+summary(B4orAF_hatch_all.nymphs.lastdes.mai) # all ns >0.05
+#summary(B4orAF_hatch_propAnts_all.eggs.lastdes.vis.mai)
+
+summary(B4orAF_hatch_surv_all.nymphs.mai) # any_antsP_AFH*, stratnymphs:any_antsP_AFH*
+summary(B4orAF_hatch_propAnts_all.nymphs.lastdes.mai) # last_des_rel2h*
+summary(B4orAF_hatch_all.nymphs.lastdes.mai) # all ns >0.05
+#summary(B4orAF_hatch_propAnts_all.nymphs.lastdes.vis.mai)
+
+summary(B4orAF_hatch_surv_all.Esurv.mai) # any_antsP_AFH*, stratnymphs:any_antsP_AFH*
+summary(B4orAF_hatch_propAnts_all.Esurv.lastdes.mai) # last_des_rel2h*
+summary(B4orAF_hatch_all.Esurv.lastdes.mai) # any_antsP_AFH*
+#summary(B4orAF_hatch_propAnts_all.Esurv.lastdes.vis.mai)
+```
+
+
+
+```{r}
+
+# multi-clutch plants vs single-clutch plants
+ants_days_data %>%
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, n_clutches_on_plant>1) %>%
+  mutate(ants_P=ifelse(ants_P==0,NA,ants_P)) %>%
+ggplot(data=, aes(y=reorder(location,desc(last_des_rel2h)),x=Date-est_hatch, color=log(ants_P))) +
+  geom_point() +
+  geom_point(aes(y=reorder(location,desc(last_des_rel2h)), x=last_des_rel2h+1), shape=8, color="black") +
+  theme_publilia() +
+  scale_colour_gradientn(colours=rainbow(6)) +
+  theme(axis.text.y = element_blank(), axis.title.y = element_blank(), axis.ticks.y = element_blank())
+
+ants_days_data %>%
+  left_join(clutch_survivorship_data) %>%
+  filter(!ants_removed, !females_removed, n_clutches_on_plant==1) %>%
+  mutate(ants_P=ifelse(ants_P==0,NA,ants_P)) %>%
+ggplot(data=, aes(y=reorder(location,desc(last_des_rel2h)),x=Date-est_hatch, color=log(ants_P))) +
+  geom_point() +
+  geom_point(aes(y=reorder(location,desc(last_des_rel2h)), x=last_des_rel2h+1), shape=8, color="black") +
+  theme_publilia() +
+  scale_colour_gradientn(colours=rainbow(6)) +
+  theme(axis.text.y = element_blank(), axis.title.y = element_blank(), axis.ticks.y = element_blank())
+
+ants_days_data %>%
+  filter(ants_removed) %>%
+  mutate(ants_P=ifelse(ants_P==0,NA,ants_P)) %>%
+ggplot(data=, aes(y=reorder(location,n_days_antsP),x=Date-est_hatch, color=log(ants_P))) +
+  geom_point() +
+  theme_publilia() +
+    scale_colour_gradientn(colours=rainbow(6))
+
+
+# how many clutches actually ever had ants vs. not?
+ant_counts %>%
+  ggplot(data=., aes(x=ants_treatment, fill=ifelse(ever_antsP,"ever ants", "never ants"))) +
+  geom_bar() +
+  theme_publilia() + facet_wrap(~ifelse(females_removed, "Females removed", "Control"))
+
+
+
+
+```
+
+ant arrival times
+```{r}
+antP_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsP_afh=ants_P&afh) %>%
+    filter(is_antsP_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antP_arrival_afh=Date-est_hatch) %>%
+  select(location, antP_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antP_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsP_bfh=ants_P&b4h) %>%
+    filter(is_antsP_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antP_last_b4h=Date-est_hatch) %>%
+  select(location, antP_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_arrival_afh_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsL_afh=ants_L&afh) %>%
+    filter(is_antsL_afh) %>%
+    slice_head(n=1) %>% 
+  mutate(antL_arrival_afh=Date-est_hatch) %>%
+  select(location, antL_arrival_afh, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+antL_last_b4h_data <- All_data_v6 %>%
+  left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
+  group_by(location) %>%
+    mutate(b4h=Date>=initiation_date&Date<est_hatch,
+           afh=Date>=est_hatch,
+           is_antsL_bfh=ants_L&b4h) %>%
+    filter(is_antsL_bfh) %>%
+    slice_tail(n=1) %>% 
+  mutate(antL_last_b4h=Date-est_hatch) %>%
+  select(location, antL_last_b4h, ants_removed, females_removed,
+         initiation_date, est_hatch) %>%
+  ungroup() %>%
+  mutate(Dorm=substr(location,1,1),
+         ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
+
+ant_data <- ant_counts %>%
+  left_join(antP_last_b4h_data) %>%
+  left_join(antP_arrival_afh_data) %>%
+  left_join(antL_last_b4h_data) %>%
+  left_join(antL_arrival_afh_data)
+
+visited_1st_4d_data_ants <- visited_1st_4d_data %>%
+  left_join(ant_data)
+
+visited_1st_4d_data_ants %>%
+  filter(ever_antsP) %>%
+  ggplot(data=., aes(x=est_rel2h, y=antL_last_b4h, color=females_removed)) +
+  geom_point() +
+  geom_abline(slope=1)
+
+visited_1st_4d_data_ants %>%
+  filter(ants_treatment=="Control", females_removed) %>%
+  ggplot(data=., aes(x=est_rel2h, y=antL_last_b4h)) +
+  geom_point() +
+  geom_abline(slope=1)
+
+visited_1st_4d_data_ants %>%
+  filter(ever_antsP) %>%
+  ggplot(data=., aes(x=est_rel2h, y=antL_arrival_afh, color=females_removed)) +
+  geom_point() +
+  geom_smooth(method=lm) +
+  geom_abline(slope=1)
+
+visited_1st_4d_data_ants %>%
+  filter(ever_antsP) %>%
+  ggplot(data=., aes(x=est_rel2h>=0, y=antL_last_b4h)) +
+  geom_boxplot()
+
+visited_1st_4d_data_ants %>%
+  filter(ants=="Control") %>%
+  ggplot(data=., aes(x=est_rel2h>=0, y=antL_arrival_afh)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=1, width=0.35, height=0) +
+  stat_summary(fun=mean, geom="point", shape=4, size=3)
+
+visited_1st_4d_data_ants %>%
+  filter(est_rel2h<=4) %>%
+  filter(ants=="Control", !females_removed) %>%
+  ggplot(data=., aes(x=est_rel2h>=-4, y=antL_arrival_afh)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=1, width=0.35, height=0) +
+  stat_summary(fun=mean, geom="point", shape=4, size=3)
+
+visited_1st_4d_data_ants %>%
+  filter(ants=="Control") %>%
+  ggplot(data=., aes(x=females_removed, y=antL_arrival_afh)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=1, width=0.35, height=0) +
+  stat_summary(fun=mean, geom="point", shape=4, size=3)
+```
+
+```{r}
+## Not visited early
+# ever ants b4h
+ggplot(data = filter(visited_1st_4d_data_ants, 
+                                 `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends<last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color = ever_antsP_b4h, fill = ever_antsP_b4h), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+# ever ants afh
+ggplot(data = filter(visited_1st_4d_data_ants, 
+                                 `visited in 4 days` == "Not visited",
+                                 !grepl("U", Female_ID), !females_removed, mom_at_init,
+                                 clutch_initiated_order == 1, visit_ends < last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color=ever_antsP_afh, fill=ever_antsP_afh), 
+            alpha = 0.75, stat='bin', binwidth=4, size=0, position="identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+## Visited early
+# ever ants b4h
+ggplot(data = filter(visited_1st_4d_data_ants,
+                     `visited in 4 days` == "Visited",
+                     !grepl("U", Female_ID), !females_removed, mom_at_init,
+                     clutch_initiated_order == 1, visit_ends<last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color = ever_antsP_b4h, fill = ever_antsP_b4h), 
+            alpha = 0.75, stat='bin', binwidth = 4, size = 0, position = "identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+
+# ever ants afh
+ggplot(data = filter(visited_1st_4d_data_ants,
+                     `visited in 4 days` == "Visited",
+                     !grepl("U", Female_ID), !females_removed, mom_at_init,
+                     clutch_initiated_order == 1, visit_ends < last_day_fID)) +
+  geom_area(aes(x = est_rel2h, y=..density.., 
+                color=ever_antsP_afh, fill=ever_antsP_afh), 
+            alpha = 0.75, stat='bin', binwidth=4, size=0, position="identity") + 
+  theme_publilia() +
+  xlab("Desert date relative to hatching") +
+  ylab("Proportion of females") +
+  scale_color_manual(values = c("black", "brown1")) +
+ scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = -20, linetype="dotted", 
+                color = "gray", size=1) +
+  geom_vline(xintercept = 0, linetype="dashed", 
+                color = "gray", size=1)
+```
+

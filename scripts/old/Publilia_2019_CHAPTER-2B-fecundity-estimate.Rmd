@@ -1,0 +1,1624 @@
+---
+title: "Publilia_2019_CHAPTER-2B-fecundity-estimate"
+author: "micah fletcher"
+date: "1/18/2022"
+output: html_document
+---
+
+# Publilia 2019 Chapter - Script 2B: modeling fecundity
+This is meant to consolidate previous scripts and provide a readable and reproducible record of the analyses for the Publilia Chapter.
+
+2) *Fecundity:* No support for trade-off between current care and future fecundity
+  - *Dataset B [supp: modeling fecundity ~ guarding]* requirements:
+    - Guarding durations of ALL females that visited a clutch are accurate.
+      - Cannot exclude any females, including unmarked or ambiguously marked females, because I need them for the sum of guarding time.
+    - Maximum number of eggs per clutch is accurate.
+    - Can partition 
+      - early clutches vs. later clutches
+      - single-mother clutches vs. multiple-mother clutches
+      - ants vs. no ants
+  - *Dataset C [estimating fecundity]* requirements:
+    - Guarding durations of ALL females that visited a clutch are accurate.
+      - Cannot exclude any females, including unmarked or ambiguously marked females, because I need them for the sum of guarding time.
+    - Maximum number of eggs per clutch is accurate.
+    - Numbers of clutches per female (and guarding duration and eggs for each) are accurate.
+      - Cannot exclude any clutches, including those with ambiguous initiators, or unknown hatch dates
+    - Models/heuristics of focal female contribution to clutch are clearly defined and sensible.
+      1) simple equal proportion of days
+      2) equal proportion of days with "intercept" given to the initiator
+      3) unequal proportion of days for initiator(s) vs visitors, with intercept also given to the initiator
+      4) Reproducing Zink's fecundity
+
+# 0 - Data import
+
+# 1 - Data prep
+
+iteroparity and the trade-off between initiating and visiting
+```{r}
+visited_1st_4d_data_tb %>%
+  filter(!is.na(initiation_date)) %>%
+  count(Female_ID, mom_at_init) %>%
+  count(mom_at_init, n)
+
+visited_1st_4d_data_tb %>%
+  filter(!is.na(initiation_date)) %>%
+  group_by(Female_ID) %>%
+    summarize(n_init = sum(mom_at_init),
+              n_visit = sum(!mom_at_init)) %>%
+  ggplot(data=., aes(x=n_init, y=n_visit)) +
+  geom_hex(binwidth=1) + 
+    scale_fill_gradientn(colours=rainbow(4))
+
+visited_1st_4d_data_tb %>%
+  filter(!is.na(initiation_date)) %>%
+  group_by(Female_ID) %>%
+    summarize(n_init = sum(mom_at_init),
+              n_visit = sum(!mom_at_init),
+              ants_removed = first(ants_removed)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=n_init, y=n_visit)) +
+  geom_count(aes(size=after_stat(prop), color=after_stat(prop), group = 1)) + 
+    scale_size_area(max_size=10) +
+  facet_wrap(vars(ants_removed), ncol=1)
+```
+
+same but for different strategies on the first clutch
+```{r}
+clutch_egg_num_data
+visited_1st_4d_data_tb %>%
+  filter(!is.na(initiation_date))
+
+
+
+est_fecundity_clutch <- visited_1st_4d_data_tb %>%
+  group_by(Female_ID) %>%
+  mutate(started_by_initiating =
+           any(clutch_visited_order==1&clutch_initiated_order==1)) %>%
+  ungroup() %>%
+  select(location, Female_ID, clutch_visited_order, clutch_initiated_order, desert_rel2h = est_rel2h,
+         mom_at_init, `visited in 4 days`, started_by_initiating) %>%
+  left_join(select(clutch_egg_num_data, -`visited in 4 days`), by=c("location")) %>%
+  mutate(est_eggs_clutchS_sc2h = n_eggs*(initMb4h_sc2hS/mDb4h_sc2h),
+         est_eggs_clutchL_sc2h = n_eggs*(initMb4h_sc2hL/mDb4h_sc2h)) %>%
+  group_by(Female_ID) %>%
+    mutate(est_eggs_lifeL_sc2h = sum(est_eggs_clutchL_sc2h, na.rm = TRUE),
+           est_eggs_lifeS_sc2h = sum(est_eggs_clutchS_sc2h, na.rm = TRUE),
+           n_clutches_iv = n(),
+           n_initiated = sum(!is.na(clutch_initiated_order)),
+           n_visited = sum(!is.na(initiation_date)&is.na(clutch_initiated_order)),
+           n_feed = sum(is.na(initiation_date)),
+           init_visit_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "Initiated only"),
+                                           ifelse(!any(mom_at_init), "Visited only", NA)),
+           one_both_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "One"),
+                                           ifelse(!any(mom_at_init), "One", NA))) %>%
+  ungroup()
+
+est_fecundity_future <- est_fecundity_clutch %>%
+  #filter(clutch_initiated_order == 1) %>% I plotted all the stuff for field day using this instead of first visited
+  filter(clutch_visited_order == 1) %>%
+  mutate(est_eggs_futureL_sc2h = est_eggs_lifeL_sc2h - est_eggs_clutchL_sc2h,
+         est_eggs_futureS_sc2h = est_eggs_lifeS_sc2h - est_eggs_clutchS_sc2h,
+         desert_catL = ifelse(desert_rel2hL <= -16, "desert",
+                             ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4,
+                                    "eggs","nymphs")),
+         visited_cat = ifelse(`visited in 4 days` == "Visited", "vis", "not"),
+         desert_catS = ifelse(desert_rel2hS <= -16, "desert",
+                             ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4,
+                                    "eggs","nymphs")))
+
+est_fecundity_strat_cats <- est_fecundity_future %>%
+  select(Female_ID, location, mDb4h_sc2h,
+         initMb4h_sc2hL, desert_rel2hL,
+         est_eggs_clutchL_sc2h, est_eggs_lifeL_sc2h, est_eggs_futureL_sc2h, desert_catL,
+         initMb4h_sc2hS, desert_rel2hS,
+         est_eggs_clutchS_sc2h, est_eggs_lifeS_sc2h, est_eggs_futureS_sc2h, desert_catS,
+         females_removed, ants_removed, clutch_initiated_order,
+         n_clutches_iv, n_initiated, n_visited, init_visit_life_tactic, `visited in 4 days`)
+
+est_fecundity_future %>%
+  ggplot(data=., aes(x=n_initiated, y=n_visited)) +
+  geom_count(aes(size=after_stat(prop), color=after_stat(prop), group = 1)) + 
+    scale_size_area(max_size=10) +
+  facet_wrap(vars(ants_removed, desert_catL), nrow=1)
+
+strat_fec_geom_count_ants0 <- est_fecundity_future %>%
+  filter(!ants_removed, !females_removed) %>%
+  ggplot(data=., aes(x=n_initiated, y=n_visited)) +
+  geom_count(aes(size=after_stat(prop), color=after_stat(prop), group = 1)) + 
+    scale_size_area(max_size=10) +
+    ylim(0,3) + xlim(0,6) +
+  facet_wrap(vars(desert_catL), nrow=1)
+
+strat_fec_geom_count_ants1 <- est_fecundity_future %>%
+  filter(ants_removed, !females_removed) %>%
+  ggplot(data=., aes(x=n_initiated, y=n_visited)) +
+  geom_count(aes(size=after_stat(prop), color=after_stat(prop), group = 1)) + 
+    scale_size_area(max_size=10) +
+    ylim(0,3) + xlim(0,6) +
+  facet_wrap(vars(desert_catL), nrow=1)
+
+ggpubr::ggarrange(strat_fec_geom_count_ants0, strat_fec_geom_count_ants1, 
+          ncol=1)
+
+```
+
+# 2 - Iteroparity
+estimating iteroparity: number of clutches (and how long they guarded them)
+ - resurrect my old plots and make sure they aren't leaving out any important data
+ - recreate Zink's figures/text with my data
+  - Fig 4A: number of clutches
+  - Fig 4B: mean size (length) of future clutches
+  - Fig 4C: duration on remaining clutches
+  - from text (not shown): size (length) of the initial egg mass
+  
+### Zink Fig 2A:
+```{r}
+est_fecundity_clutch_zink <- visited_1st_4d_data_tb %>%
+  group_by(Female_ID) %>%
+  mutate(started_by_initiating =
+           any(clutch_visited_order==1&clutch_initiated_order==1)) %>%
+  ungroup() %>%
+  select(location, Female_ID, clutch_initiated_order, guard_duration, desert_rel2h = est_rel2h,
+         mom_at_init, `visited in 4 days`, started_by_initiating) %>%
+  left_join(clutch_egg_num_data, by=c("location")) %>%
+  mutate(egg_guard_cat_zink = cut(guard_duration, breaks=c(0,4,10,20)),
+         len_future_zink = ifelse(clutch_initiated_order>1, mean_l_t5eggs, NA),
+         dur_future_zink = ifelse(clutch_initiated_order>1, guard_duration, NA),
+         len_first_zink = ifelse(clutch_initiated_order==1, mean_l_t5eggs, NA)) %>%
+  group_by(Female_ID) %>%
+  summarize(n_broods_future_zink = sum(!is.na(clutch_initiated_order)&clutch_initiated_order>1),
+            mean_len_future_zink = ifelse(is.nan(mean(len_future_zink, na.rm=T)),
+                                          NA,mean(len_future_zink, na.rm=T)),
+            mean_dur_future_zink = ifelse(is.nan(mean(dur_future_zink, na.rm=T)),
+                                          NA,mean(dur_future_zink, na.rm=T)),
+            mean_len_first_zink = ifelse(is.nan(mean(len_first_zink, na.rm=T)),
+                                          NA,mean(len_first_zink, na.rm=T)),
+            egg_guard_cat_zink = first(egg_guard_cat_zink),
+            n_clutches_iv = n(),
+            n_initiated = sum(!is.na(clutch_initiated_order)),
+            n_visited = sum(!is.na(initiation_date)&is.na(clutch_initiated_order)),
+            n_feed = sum(is.na(initiation_date)),
+            started_by_initiating = first(started_by_initiating),
+            ants_removed = first(ants_removed),
+            females_removed = first(females_removed)) %>%
+  ungroup()
+
+zink_4A_data <- est_fecundity_clutch_zink %>%
+  filter(!is.na(egg_guard_cat_zink), # remove any females that stayed longer than 20 days after init 
+         started_by_initiating, # remove any females that started by visiting
+         !ants_removed, !females_removed) %>% # he didn't remove ants or females
+  mutate(zink4 = ifelse(egg_guard_cat_zink=="(0,4]","Remain","Abandon"),
+         zink10 = ifelse(egg_guard_cat_zink %in% c("(0,4]","(4,10]"),"Remain","Abandon"),
+         zink20 = ifelse(egg_guard_cat_zink=="(10,20]","Remain","Abandon"))
+
+std.err <- function(x, na.rm = FALSE) {
+ if (na.rm) x <- na.omit(x)
+ sqrt(var(x) / length(x))
+}
+
+zink_Fig4_data_summary4 <- zink_4A_data %>%
+  group_by(zink4) %>%
+    summarize(n_broods_future_zink_m = mean(n_broods_future_zink, na.rm=T),
+              n_broods_future_zink_se = std.err(n_broods_future_zink, na.rm=T),
+              mean_len_future_zink_m = mean(mean_len_future_zink, na.rm=T),
+              mean_len_future_zink_se = std.err(mean_len_future_zink, na.rm=T),
+              mean_dur_future_zink_m = mean(mean_dur_future_zink, na.rm=T),
+              mean_dur_future_zink_se = std.err(mean_dur_future_zink, na.rm=T),
+              mean_len_first_zink_m = mean(mean_len_first_zink, na.rm=T),
+              mean_len_first_zink_se = std.err(mean_len_first_zink), na.rm=T) %>%
+  ungroup()
+
+zink_Fig4_data_summary10 <- zink_4A_data %>%
+  group_by(zink10) %>%
+    summarize(n_broods_future_zink_m = mean(n_broods_future_zink, na.rm=T),
+              n_broods_future_zink_se = std.err(n_broods_future_zink, na.rm=T),
+              mean_len_future_zink_m = mean(mean_len_future_zink, na.rm=T),
+              mean_len_future_zink_se = std.err(mean_len_future_zink, na.rm=T),
+              mean_dur_future_zink_m = mean(mean_dur_future_zink, na.rm=T),
+              mean_dur_future_zink_se = std.err(mean_dur_future_zink, na.rm=T),
+              mean_len_first_zink_m = mean(mean_len_first_zink, na.rm=T),
+              mean_len_first_zink_se = std.err(mean_len_first_zink, na.rm=T)) %>%
+  ungroup()
+
+zink_Fig4_data_summary20 <- zink_4A_data %>%
+  group_by(zink20) %>%
+    summarize(n_broods_future_zink_m = mean(n_broods_future_zink, na.rm=T),
+              n_broods_future_zink_se = std.err(n_broods_future_zink, na.rm=T),
+              mean_len_future_zink_m = mean(mean_len_future_zink, na.rm=T),
+              mean_len_future_zink_se = std.err(mean_len_future_zink, na.rm=T),
+              mean_dur_future_zink_m = mean(mean_dur_future_zink, na.rm=T),
+              mean_dur_future_zink_se = std.err(mean_dur_future_zink, na.rm=T),
+              mean_len_first_zink_m = mean(mean_len_first_zink, na.rm=T),
+              mean_len_first_zink_se = std.err(mean_len_first_zink, na.rm=T)) %>%
+  ungroup()
+  
+# n_broods_future_zink_m
+Zink_Fig4A1 <- zink_Fig4_data_summary4 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = n_broods_future_zink_m, x =zink4, fill=zink4), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = n_broods_future_zink_m-n_broods_future_zink_se,
+                    ymax = n_broods_future_zink_m+n_broods_future_zink_se,
+                    x =zink4), width = 0.2, 
+               stat = "identity", position="dodge") +
+  ylim(0,0.9) + ylab("Number of future broods initiated") +
+  xlab("Days 0-4") + 
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4A2 <- zink_Fig4_data_summary10 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = n_broods_future_zink_m, x =zink10, fill=zink10), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = n_broods_future_zink_m-n_broods_future_zink_se,
+                    ymax = n_broods_future_zink_m+n_broods_future_zink_se,
+                    x =zink10), width = 0.2,
+               stat = "identity", position="dodge") +
+  ylim(0,0.9)  +
+  xlab("Days 5-10") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4A3 <- zink_Fig4_data_summary20 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = n_broods_future_zink_m, x =zink20, fill=zink20), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = n_broods_future_zink_m-n_broods_future_zink_se,
+                    ymax = n_broods_future_zink_m+n_broods_future_zink_se,
+                    x =zink20), width = 0.2 ,
+               stat = "identity", position="dodge") +
+  ylim(0,0.9)  +
+  xlab("Days 11-20") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+
+# mean_len_future_zink_m
+Zink_Fig4B1 <- zink_Fig4_data_summary4 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_len_future_zink_m, x =zink4, fill=zink4), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_len_future_zink_m-mean_len_future_zink_se,
+                    ymax = mean_len_future_zink_m+mean_len_future_zink_se,
+                    x =zink4), width = 0.2,
+               stat = "identity", position="dodge") +
+  ylim(0,15) + ylab("Mean size of future egg masses (mm)") +
+  xlab("Days 0-4") + 
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4B2 <- zink_Fig4_data_summary10 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_len_future_zink_m, x =zink10, fill=zink10), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_len_future_zink_m-mean_len_future_zink_se,
+                    ymax = mean_len_future_zink_m+mean_len_future_zink_se,
+                    x =zink10), width = 0.2, 
+               stat = "identity", position="dodge") +
+  ylim(0,15) +
+  xlab("Days 5-10") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4B3 <- zink_Fig4_data_summary20 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_len_future_zink_m, x =zink20, fill=zink20), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_len_future_zink_m-mean_len_future_zink_se,
+                    ymax = mean_len_future_zink_m+mean_len_future_zink_se,
+                    x =zink20), width = 0.2, 
+               stat = "identity", position="dodge") +
+  ylim(0,15) +
+  xlab("Days 11-20") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+
+# mean_dur_future_zink_m
+Zink_Fig4C1 <- zink_Fig4_data_summary4 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_dur_future_zink_m, x =zink4, fill=zink4), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_dur_future_zink_m-mean_dur_future_zink_se,
+                    ymax = mean_dur_future_zink_m+mean_dur_future_zink_se,
+                    x =zink4), width = 0.2,
+               stat = "identity", position="dodge") +
+  ylim(0,30) + ylab("Mean future guarding duration (days)") +
+  xlab("Days 0-4") + 
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4C2 <- zink_Fig4_data_summary10 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_dur_future_zink_m, x =zink10, fill=zink10), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_dur_future_zink_m-mean_dur_future_zink_se,
+                    ymax = mean_dur_future_zink_m+mean_dur_future_zink_se,
+                    x =zink10), width = 0.2, 
+               stat = "identity", position="dodge") +
+  ylim(0,30) +
+  xlab("Days 5-10") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4C3 <- zink_Fig4_data_summary20 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_dur_future_zink_m, x =zink20, fill=zink20), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_dur_future_zink_m-mean_dur_future_zink_se,
+                    ymax = mean_dur_future_zink_m+mean_dur_future_zink_se,
+                    x =zink20), width = 0.2, 
+               stat = "identity", position="dodge") +
+  ylim(0,30) +
+  xlab("Days 11-20") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+  
+ggpubr::ggarrange(Zink_Fig4A1, Zink_Fig4A2, Zink_Fig4A3,
+          Zink_Fig4B1, Zink_Fig4B2, Zink_Fig4B3,
+          Zink_Fig4C1, Zink_Fig4C2, Zink_Fig4C3,
+          common.legend=TRUE)
+
+# mean_len_first_zink_m
+Zink_Fig4D1 <- zink_Fig4_data_summary4 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_len_first_zink_m, x =zink4, fill=zink4), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_len_first_zink_m-mean_len_first_zink_se,
+                    ymax = mean_len_first_zink_m+mean_len_first_zink_se,
+                    x =zink4), width = 0.2,
+               stat = "identity", position="dodge") +
+  ylim(0,20) + ylab("Mean size of first clutch (mm)") +
+  xlab("Days 0-4") + 
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4D2 <- zink_Fig4_data_summary10 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_len_first_zink_m, x =zink10, fill=zink10), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_len_first_zink_m-mean_len_first_zink_se,
+                    ymax = mean_len_first_zink_m+mean_len_first_zink_se,
+                    x =zink10), width = 0.2, 
+               stat = "identity", position="dodge") +
+  ylim(0,20) +
+  xlab("Days 5-10") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+
+Zink_Fig4D3 <- zink_Fig4_data_summary20 %>% 
+ggplot(data=.) +
+  geom_bar(aes(y = mean_len_first_zink_m, x =zink20, fill=zink20), 
+               stat = "identity", position="dodge") +
+  geom_errorbar(aes(ymin = mean_len_first_zink_m-mean_len_first_zink_se,
+                    ymax = mean_len_first_zink_m+mean_len_first_zink_se,
+                    x =zink20), width = 0.2, 
+               stat = "identity", position="dodge") +
+  ylim(0,20) +
+  xlab("Days 11-20") + 
+  theme(axis.title.y = element_blank(),
+        axis.text=element_blank(),
+        axis.ticks=element_blank(),
+        axis.line.y=element_blank(),
+        axis.title = element_text(size=10))
+
+ggpubr::ggarrange(Zink_Fig4A1, Zink_Fig4A2, Zink_Fig4A3,
+          Zink_Fig4B1, Zink_Fig4B2, Zink_Fig4B3,
+          Zink_Fig4C1, Zink_Fig4C2, Zink_Fig4C3,
+          Zink_Fig4D1, Zink_Fig4D2, Zink_Fig4D3,
+          ncol=3, nrow=4,
+          common.legend=TRUE)
+```
+
+I think there is definitely a better way to do what Figure 4A is trying to do. Such as a logistic regression of desertion date vs. number of future broods initiated (or even binary = whether initiated a future clutch or not). Mean number of eggs in future egg masses would be better, although I would prefer to estimate the number of eggs in the lifetime directly.
+
+### Number of clutches laid
+```{r}
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  count(desert_catL, ants_removed)
+
+# Initiated or visited
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = n_initiated+n_visited, x = desert_catL, fill=ants_removed)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
+  theme_publilia()
+
+# Initiated only
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = n_initiated, x = desert_catL, fill=ants_removed)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  theme_publilia()
+
+# Visited only
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = n_visited, x = desert_catL, fill=ants_removed)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  theme_publilia()
+
+# Feed only
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = n_feed, x = desert_catL, fill=ants_removed)) +
+  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
+  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
+  theme_publilia()
+
+```
+
+### Mean size of clutches
+```{r}
+## tbL
+# First clutch
+est_fecundity_clutch %>%
+  filter(!females_removed, clutch_initiated_order==1) %>%
+  left_join(select(est_fecundity_future, location, Female_ID, desert_catL, visited_cat)) %>%
+  ggplot(data=., aes(y = mean_t5eggs, x = desert_catL, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Total size of first clutch (number of eggs)")
+
+# Mean for future clutches
+est_fecundity_clutch %>%
+  filter(!females_removed, clutch_initiated_order>1) %>%
+  left_join(select(est_fecundity_future, Female_ID, desert_catL, visited_cat)) %>%
+  filter(!is.na(desert_catL)) %>% # not sure why E_Gkgg doesn't have a desert_catL
+  group_by(Female_ID) %>%
+  mutate(mean_eggs_future_clutches = mean(mean_t5eggs, na.rm=T)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(y = mean_eggs_future_clutches, x = desert_catL, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Mean size of future clutches (number of eggs)")
+
+## tbS
+# First clutch
+est_fecundity_clutch %>%
+  filter(!females_removed, clutch_initiated_order==1) %>%
+  left_join(select(est_fecundity_future, location, Female_ID, desert_catS, visited_cat)) %>%
+  ggplot(data=., aes(y = mean_t5eggs, x = desert_catS, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Total size of first clutch (number of eggs)")
+
+# Mean for future clutches
+est_fecundity_clutch %>%
+  filter(!females_removed, clutch_initiated_order>1) %>%
+  left_join(select(est_fecundity_future, Female_ID, desert_catS, visited_cat)) %>%
+  filter(!is.na(desert_catS)) %>% # not sure why E_Gkgg doesn't have a desert_catL
+  group_by(Female_ID) %>%
+  mutate(mean_eggs_future_clutches = mean(mean_t5eggs, na.rm=T)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(y = mean_eggs_future_clutches, x = desert_catS, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Mean size of future clutches (number of eggs)")
+```
+
+### Mean guarding duration
+```{r}
+## tbL
+# Mean for future clutches
+est_fecundity_clutch %>%
+  filter(!females_removed, clutch_initiated_order>1) %>%
+  left_join(select(est_fecundity_future, Female_ID, desert_catL, visited_cat)) %>%
+  filter(!is.na(desert_catL)) %>% # not sure why E_Gkgg doesn't have a desert_catL
+  group_by(Female_ID) %>%
+  mutate(mean_init_durL_future_clutches = mean(init_durL, na.rm=T)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(y = mean_init_durL_future_clutches, x = desert_catL, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Mean guarding duration on future clutches")
+
+## tbS
+# Mean for future clutches
+est_fecundity_clutch %>%
+  filter(!females_removed, clutch_initiated_order>1) %>%
+  left_join(select(est_fecundity_future, Female_ID, desert_catS, visited_cat)) %>%
+  filter(!is.na(desert_catS)) %>% # not sure why E_Gkgg doesn't have a desert_catL
+  group_by(Female_ID) %>%
+  mutate(mean_init_durS_future_clutches = mean(init_durS, na.rm=T)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(y = mean_init_durS_future_clutches, x = desert_catS, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Mean guarding duration on future clutches")
+```
+
+### Estimated lifetime number of eggs laid
+Note: I think if I wanted to try a "no tie-breaks" version I would have to calculate est_eggs_future_sc2h and desert_cat from scratch.
+```{r}
+### Both one-clutch and multi-clutch females.
+## tbL
+# Estimated future fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_futureL_sc2h, x = desert_catL, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated future eggs laid") +
+  ylim(0,400)
+  
+## tbS
+# Estimated future fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_futureS_sc2h, x = desert_catS, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated future eggs laid") +
+  ylim(0,400)
+
+## tbL
+# Estimated lifetime fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_lifeL_sc2h, x = desert_catL, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated eggs laid in life") +
+  ylim(0,400)
+
+## tbS
+# Estimated lifetime fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_lifeS_sc2h, x = desert_catS, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated eggs laid in life") +
+  ylim(0,400)
+
+### Separating one-clutch and multi-clutch females.
+## tbL
+# Estimated future fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_futureL_sc2h, x = desert_catL, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated future eggs laid") +
+  ylim(0,400) +
+  facet_wrap(vars(n_clutches_iv>1),nrow=1)
+  
+## tbS
+# Estimated future fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_futureS_sc2h, x = desert_catS, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated future eggs laid") +
+  ylim(0,400) +
+  facet_wrap(vars(n_clutches_iv>1),nrow=1)
+
+## tbL
+# Estimated lifetime fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_lifeL_sc2h, x = desert_catL, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated eggs laid in life") +
+  ylim(0,400) +
+  facet_wrap(vars(n_clutches_iv>1),nrow=1)
+
+## tbS
+# Estimated lifetime fecundity
+est_fecundity_future %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(y = est_eggs_lifeS_sc2h, x = desert_catS, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() +
+  ylab("Estimated eggs laid in life") +
+  ylim(0,400) +
+  facet_wrap(vars(n_clutches_iv>1),nrow=1)
+```
+
+## How do the lifetime fecundities of females change with their longevity?
+Would one strategy be more advantageous to short-lived females than long-lived females?
+```{r}
+## tbL
+# Estimated lifetime fecundity
+est_fecundity_future %>%
+  filter(n_clutches_iv==2) %>%
+  ggplot(data=., aes(y = est_eggs_lifeL_sc2h, x = desert_catL), fill="white") +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  theme_publilia() +
+  ylab("Estimated eggs laid in life") +
+  ylim(0,400) +
+  facet_wrap(vars(n_visited),nrow=1)
+```
+
+
+## Zink 2005 Figs 1, 2 and 3
+
+### Fig 1
+"The distribution of primary female guarding periods showed that many females leave immediately after egg laying but others remain well through hatching (Fig. 1A). While secondary females arrived at all times after brood initiation, their arrivals were clustered around the early days after brood initiation (Fig. 1B). Regardless of arrival time, secondary females rarely stayed longer than a few days (Fig. 1C), freeing them to lay additional clutches elsewhere on the plant. For the majority of these behaviors (88% of total) a secondary female did not switch plants (groups) between the previous brood and the host brood, confirming that females are primarily searching for hosts within their own group. Many females acted both as primary and second- ary females over the course of their lifetime. There was no greater chance that a female repeated the same tactic versus switched tactics from first to second brood for 1998 (c2=0.02, df=1, P=0.88) and 1999 (c2=1.00, df=1, P=0.32). There was also no pattern between the second and third broods in 1998 (c2=0.16, df=1, P=0.69) and 1999 (c2=0.08, df=1, P=0.78)."
+
+### Fig 2
+"Females that exhibited the secondary tactic did not exhibit any reduction in the ability to initiate primary egg masses. Across all females in 1998, there was no relationship between the number of secondary broods a female laid and the total number of primary broods she initiated over her lifetime (r=􏳸0.02, n=478, P=0.63). Taking all females that exhibited the primary tactic and separating them into those that did and did not lay secondary eggs across their lifetimes revealed no difference in the total number of primary egg masses initiated (Z=0.2, n1=231, n2=196,P=0.84). A comparison of the same two groups revealed no difference in the size of primary egg masses (as averaged within females; Z=1.8, n1=231, n2=196, P=0.08)."
+```{r}
+est_fecundity_clutch %>%
+  distinct(location, visited, num_at_init, mean_t5eggs, ants_removed, females_removed) %>%
+  #filter(females_removed) %>%
+  filter(!is.na(females_removed)) %>% # why is this necessary?
+  ggplot(data=., aes(x=visited|num_at_init>1, y=mean_t5eggs, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  scale_x_discrete(labels=c("Not visited","Visited")) +
+  scale_fill_manual(labels=c("Control","Ants removed"), values=c("white","brown1")) +
+  ylab("Total number of eggs laid in clutch") +
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(females_removed), nrow=1) +
+  ggtitle("Female removal")
+
+est_fecundity_clutch %>%
+  distinct(location, visited, num_at_init, mean_t5eggs, ants_removed, females_removed) %>%
+  filter(!females_removed) %>%
+  filter(!is.na(females_removed)) %>% # why is this necessary?
+  ggplot(data=., aes(x=visited|num_at_init>1, y=mean_t5eggs, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.9), outlier.shape=NA, size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  scale_x_discrete(labels=c("Not visited","Visited")) +
+  scale_fill_manual(labels=c("Control","Ants removed"), values=c("white","brown1")) +
+  ylab("Total number of eggs laid in clutch") +
+  theme_publilia() +
+  theme(axis.title.x = element_blank())
+
+est_fecundity_clutch %>%
+  distinct(location, visited, num_at_init, mean_t5eggs, ants_removed, females_removed) %>%
+  #filter(females_removed) %>%
+  filter(!is.na(females_removed)) %>% # why is this necessary?
+  ggplot(data=., aes(x=visited|num_at_init>1, y=mean_t5eggs), fill="white") +
+  geom_boxplot(outlier.shape=NA, size = 1.5) +
+  geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  scale_x_discrete(labels=c("Not visited","Visited")) +
+  ylab("Total number of eggs laid in clutch") +
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(females_removed), nrow=1) +
+  ggtitle("Female removal")
+```
+
+### Fig 3 - Estimated lifetime fecundity
+"Figure 2 reveals that, on average, primary females lay approximately 67% of eggs in a shared egg mass (70 out of 105 eggs). Adjusting for the average number of secondary females per brood, 1.47 (0.06), an individual secondary female is expected to contribute 23% of the eggs in a communal clutch. In unshared egg masses all counted eggs were attributed to the primary female but in shared egg masses the overall number of counted eggs were allocated to primary females and secondary females according to these estimates. Lifetime fecundity was then calculated as the total number of eggs laid by a female across all of her broods (both primary and secondary)."
+
+** Note that I think the "sensu Zink" values are calculated wrong here. I think they double/multi-count the number of eggs for clutches there are more than one female on a given clutch.
+```{r}
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date), !females_removed) %>%
+  mutate(est_fecundity_clutch_z05 = ifelse(mom_at_init, mean_t5eggs*0.67, mean_t5eggs*0.23)) %>%
+  group_by(Female_ID) %>%
+    summarize(est_fecundity_life_z05 = sum(est_fecundity_clutch_z05, na.rm=T),
+              init_visit_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "Initiated only"),
+                                           ifelse(!any(mom_at_init), "Visited only", NA)),
+              one_or_both_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "One"),
+                                           ifelse(!any(mom_at_init), "One", NA)),
+              ants_removed = first(ants_removed)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_fecundity_life_z05, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  scale_fill_manual(labels=c("Control","Ants removed"), values=c("white","brown1")) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu Zink 2005")))) +
+  theme_publilia() +
+  theme(axis.title.x = element_blank())
+
+est_fecundity_clutch %>%
+  mutate(est_eggs_futureL_sc2h = est_eggs_lifeL_sc2h - est_eggs_clutchL_sc2h,
+         est_eggs_futureS_sc2h = est_eggs_lifeS_sc2h - est_eggs_clutchS_sc2h,
+         desert_catL = ifelse(desert_rel2hL <= -16, "desert",
+                             ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4,
+                                    "eggs","nymphs")),
+         visited_cat = ifelse(`visited in 4 days` == "Visited", "vis", "not"),
+         desert_catS = ifelse(desert_rel2hS <= -16, "desert",
+                             ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4,
+                                    "eggs","nymphs"))) %>%
+  distinct(Female_ID, init_visit_life_tactic, est_eggs_lifeL_sc2h, ants_removed, females_removed) %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_eggs_lifeL_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5) +
+  #geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  scale_fill_manual(labels=c("Control","Ants removed"), values=c("white","brown1")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  theme_publilia() +
+  theme(axis.title.x = element_blank())
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  filter(!females_removed) %>%
+  #filter(clutch_visited_order>0) %>% # don't include females that were present before init or after hatch
+  mutate(est_fecundity_clutch_z05 = ifelse(mom_at_init, mean_t5eggs*0.67, mean_t5eggs*0.23)) %>%
+  group_by(Female_ID) %>%
+    summarize(est_fecundity_life_z05 = sum(est_fecundity_clutch_z05, na.rm=T),
+              init_visit_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "Initiated only"),
+                                           ifelse(!any(mom_at_init), "Visited only", NA)),
+              ants_removed = first(ants_removed)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_fecundity_life_z05), fill=NA) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu Zink 2005")))) +
+  ylim(0,200) + # this omits one outlier
+  theme_publilia() +
+  theme(axis.title.x = element_blank())
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Female_ID, init_visit_life_tactic, est_eggs_lifeL_sc2h, ants_removed, females_removed, n_clutches_iv) %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_eggs_lifeL_sc2h), fill=NA) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  ylim(0,200) + # this omits one outlier
+  theme_publilia() +
+  theme(axis.title.x = element_blank())
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Female_ID, init_visit_life_tactic, est_eggs_lifeL_sc2h, ants_removed, females_removed, n_clutches_iv) %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_eggs_lifeL_sc2h), fill=NA) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  ylim(0,200) + # this omits one outlier
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(n_clutches_iv>1), nrow=1) +
+  ggtitle("initiated or visited more than one clutch")
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Female_ID, init_visit_life_tactic, est_eggs_lifeL_sc2h, ants_removed, females_removed, n_clutches_iv) %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_eggs_lifeL_sc2h, fill=n_clutches_iv>1)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  ylim(0,200) + # this omits one outlier
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  ggtitle("initiated or visited more than one clutch")
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  filter(!females_removed) %>%
+  #filter(clutch_visited_order>0) %>% # don't include females that were present before init or after hatch
+  mutate(est_fecundity_clutch_z05 = ifelse(mom_at_init, mean_t5eggs*0.67, mean_t5eggs*0.23)) %>%
+  group_by(Female_ID) %>%
+    summarize(est_fecundity_life_z05 = sum(est_fecundity_clutch_z05, na.rm=T),
+              init_visit_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "Initiated only"),
+                                           ifelse(!any(mom_at_init), "Visited only", NA)),
+              ants_removed = first(ants_removed),
+              n_clutches_iv = first(n_clutches_iv)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_fecundity_life_z05, fill=n_clutches_iv>1)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu Zink 2005")))) +
+  ylim(0,200) + # this omits one outlier
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  ggtitle("initiated or visited more than one clutch")
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  filter(!females_removed) %>%
+  filter(clutch_visited_order>0) %>% # don't include females that were present before init or after hatch
+  mutate(est_fecundity_clutch_z05 = ifelse(mom_at_init, mean_t5eggs*0.67, mean_t5eggs*0.23)) %>%
+  group_by(Female_ID) %>%
+    summarize(est_fecundity_life_z05 = sum(est_fecundity_clutch_z05, na.rm=T),
+              init_visit_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "Initiated only"),
+                                           ifelse(!any(mom_at_init), "Visited only", NA)),
+              ants_removed = first(ants_removed),
+              n_clutches_iv = first(n_clutches_iv)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_fecundity_life_z05), fill=NA) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu Zink 2005")))) +
+  ylim(0,200) + # this omits one outlier
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(n_clutches_iv>1), nrow=1) +
+  ggtitle("initiated or visited more than one clutch")
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  mutate(est_fecundity_clutch_z05 = ifelse(mom_at_init, mean_t5eggs*0.67, mean_t5eggs*0.23)) %>%
+  group_by(Female_ID) %>%
+    summarize(est_fecundity_life_z05 = sum(est_fecundity_clutch_z05, na.rm=T),
+              init_visit_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "Initiated only"),
+                                           ifelse(!any(mom_at_init), "Visited only", NA)),
+              ants_removed = first(ants_removed),
+              n_clutches_iv = first(n_clutches_iv)) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_fecundity_life_z05, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  scale_fill_manual(labels=c("Control","Ants removed"), values=c("white","brown1")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu Zink 2005")))) +
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(n_clutches_iv>1), nrow=1)
+
+est_fecundity_clutch %>%
+  filter(!is.na(initiation_date)) %>%
+  distinct(Female_ID, init_visit_life_tactic, est_eggs_lifeL_sc2h, ants_removed, females_removed, n_clutches_iv) %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=init_visit_life_tactic, y=est_eggs_lifeL_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  scale_x_discrete(limits=c("Initiated only", "Both", "Visited only")) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  theme_publilia() +
+  theme(axis.title.x = element_blank()) +
+  facet_wrap(vars(n_clutches_iv>1), nrow=1)
+
+```
+
+Same calculations of lifetime fecundity for different desertion strategies
+```{r}
+est_fecundity_life_strats <- est_fecundity_clutch %>%
+  group_by(Female_ID) %>%
+  # clutch visited order == 0 means she visited before initiation, so it shouldn't count
+  mutate(started_by =
+           ifelse(any(clutch_visited_order==1&!is.na(clutch_initiated_order)&clutch_initiated_order==1),
+                  "initiating",
+                  ifelse(any(clutch_visited_order==1&is.na(clutch_initiated_order)),
+                         "visiting", "other")),
+         n_clutches_with_eggs_iv = sum(!is.na(clutch_visited_order)&(clutch_visited_order>0), na.rm=T)) %>%
+  ungroup() %>%
+  filter(clutch_visited_order==1) %>%
+  mutate(desert_catL_v2 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hL <= -16, "desert",
+                                        ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4, "eggs", 
+                                               ifelse(desert_rel2hL >= 4,"nymphs",
+                                                      NA))),
+                                 ifelse(started_by=="visiting", "visit", 
+                                        NA)),
+         desert_catS_v2 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hS <= -16, "desert",
+                                        ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4, "eggs", 
+                                               ifelse(desert_rel2hS >= 4,"nymphs",
+                                                      NA))),
+                                 ifelse(started_by=="visiting", "visit", 
+                                        NA)),
+         desert_catL_v3 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hL <= -16, "desert",
+                                        ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4, "eggs", 
+                                               ifelse(desert_rel2hL >= 4,"nymphs",
+                                                      NA))),
+                                 init_visit_life_tactic),
+         desert_catS_v3 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hS <= -16, "desert",
+                                        ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4, "eggs", 
+                                               ifelse(desert_rel2hS >= 4,"nymphs",
+                                                      NA))),
+                                 init_visit_life_tactic),
+         first_clutch_visited_in4d = ifelse(started_by=="initiating",
+                                            ifelse(`visited in 4 days` == "Visited", "vis", "not"),
+                                            NA)) %>%
+  distinct(Female_ID, ants_removed, females_removed, `visited in 4 days`,
+           desert_catL_v2, desert_catL_v3, desert_catS_v2, desert_catS_v3,
+           started_by, init_visit_life_tactic, one_both_life_tactic,
+           first_clutch_visited_in4d, est_eggs_lifeL_sc2h, est_eggs_lifeS_sc2h,
+           n_clutches_with_eggs_iv)
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=desert_catL_v3, y=est_eggs_lifeL_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeL_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeL_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(init_visit_life_tactic))
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeS_sc2h, fill=desert_catL_v2)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(pch = 21, size=3, width=0.35) +
+  ylab("Estimated lifetime fecundity (eggs)")  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1)
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=desert_catS_v2, y=est_eggs_lifeS_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1, init_visit_life_tactic))
+
+est_fecundity_life_strats %>%
+  filter(!females_removed, # not sure where the NAs come from!
+         !is.na(n_clutches_with_eggs_iv), !is.na(init_visit_life_tactic)) %>%
+  ggplot(data=., aes(x=desert_catS_v2, y=est_eggs_lifeS_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1, init_visit_life_tactic))
+
+est_fecundity_life_strats %>%
+  filter(!females_removed, # not sure where the NAs come from!
+         !is.na(n_clutches_with_eggs_iv), !is.na(one_both_life_tactic)) %>%
+  ggplot(data=., aes(x=desert_catS_v2, y=est_eggs_lifeS_sc2h), fill="white") +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(pch = 21, size=3, fill="white", width=0.35) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1, one_both_life_tactic), nrow=1)
+
+est_fecundity_clutch %>%
+  mutate(desert_catL = ifelse(desert_rel2hL <= -16, "desert",
+                             ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4,
+                                    "eggs","nymphs")),
+         visited_cat = ifelse(`visited in 4 days` == "Visited", "vis", "not"),
+         desert_catS = ifelse(desert_rel2hS <= -16, "desert",
+                             ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4,
+                                    "eggs","nymphs")),
+         desert_catL_v2 = ifelse(!started_by_initiating, "visited first",
+                                 ifelse(desert_rel2hL <= -16, "desert",
+                                        ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4,
+                                               "eggs",
+                                               ifelse(desert_rel2hL >= 4,"nymphs",NA))))) %>%
+  filter(!females_removed, is.na(desert_catL_v2))
+```
+
+on the adaptive value of deserting early:
+ - is deserting your first clutch early an adaptive reproductive strategy? 
+ - under what circumstances would it be adaptive vs maladaptive?
+  - low expected lifespan?
+  - large number of available host eggs?
+```{r}
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  #filter(desert_catL_v2 %in% c("desert","eggs")) %>%
+  filter(!is.na(init_visit_life_tactic), !is.na(desert_catL_v2)) %>% # need to figure out why this there are NAs
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeS_sc2h, 
+                     fill=init_visit_life_tactic)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(females_removed) %>%
+  #filter(desert_catL_v2 %in% c("desert","eggs")) %>%
+  filter(!is.na(init_visit_life_tactic), !is.na(desert_catL_v2)) %>% # need to figure out why this there are NAs
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeS_sc2h, 
+                     fill=init_visit_life_tactic)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(females_removed, n_clutches_with_eggs_iv==2) %>%
+  #filter(desert_catL_v2 %in% c("desert","eggs")) %>%
+  filter(!is.na(init_visit_life_tactic), !is.na(desert_catL_v2)) %>% # need to figure out why this there are NAs
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeS_sc2h, 
+                     fill=init_visit_life_tactic)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(females_removed) %>%
+  #filter(desert_catL_v2 %in% c("desert","eggs")) %>%
+  filter(!is.na(init_visit_life_tactic), !is.na(desert_catL_v2)) %>% # need to figure out why this there are NAs
+  ggplot(data=., aes(x=desert_catL_v2, y=n_clutches_with_eggs_iv, 
+                     fill=init_visit_life_tactic)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab("Number of clutches initiated and visited")  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  #filter(desert_catL_v2 %in% c("desert","eggs")) %>%
+  filter(!is.na(init_visit_life_tactic), !is.na(desert_catL_v2)) %>% # need to figure out why this there are NAs
+  ggplot(data=., aes(x=desert_catL_v2, y=n_clutches_with_eggs_iv, 
+                     fill=init_visit_life_tactic)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab("Number of clutches initiated and visited")  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(!females_removed, n_clutches_with_eggs_iv>1) %>%
+  #filter(desert_catL_v2 %in% c("desert","eggs")) %>%
+  filter(!is.na(init_visit_life_tactic), !is.na(desert_catL_v2)) %>% # need to figure out why this there are NAs
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeS_sc2h, 
+                     fill=init_visit_life_tactic)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  ylim(c(0,300)) +
+  theme_publilia()
+
+est_fecundity_life_strats %>%
+  filter(!females_removed, n_clutches_with_eggs_iv==2) %>%
+  #filter(desert_catL_v2 %in% c("desert","eggs")) %>%
+  filter(!is.na(init_visit_life_tactic), !is.na(desert_catL_v2)) %>% # need to figure out why this there are NAs
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeS_sc2h, 
+                     fill=init_visit_life_tactic)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  ylim(c(0,300)) +
+  theme_publilia()
+
+
+```
+
+
+early-visited clutches: stay vs. go
+```{r}
+est_fecundity_life_strats %>%
+  filter(!females_removed, `visited in 4 days`=="Visited", desert_catL_v2!="visit") %>%
+  ggplot(data=., aes(x=desert_catL_v2=="desert", y=est_eggs_lifeL_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  ggtitle("early-visited clutches: stay vs. go")
+
+est_fecundity_strat_cats %>%
+  filter(!females_removed, `visited in 4 days`=="Visited", desert_catL!="visit") %>%
+  ggplot(data=., aes(x=desert_catL=="desert", y=est_eggs_futureL_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  ggtitle("early-visited clutches: stay vs. go")
+
+est_fecundity_life_strats %>%
+  filter(!females_removed, `visited in 4 days`=="Visited", desert_catS_v2!="visit") %>%
+  ggplot(data=., aes(x=desert_catS_v2=="desert", y=est_eggs_lifeS_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  ggtitle("early-visited clutches: stay vs. go")
+
+est_fecundity_strat_cats %>%
+  filter(!females_removed, `visited in 4 days`=="Visited", desert_catS!="visit") %>%
+  ggplot(data=., aes(x=desert_catS=="desert", y=est_eggs_futureS_sc2h, fill=ants_removed)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi")))) +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  ggtitle("early-visited clutches: stay vs. go")
+
+## do early-visited clutches EVER get adopted?
+visited_1st_4d_data_tb %>%
+  left_join(est_fecundity_strat_cats) %>%
+  filter(`visited in 4 days`=="Visited", clutch_visited_order>0,
+         !females_removed)
+
+visited_1st_4d_data_tb %>%
+  left_join(est_fecundity_strat_cats) %>%
+  left_join(first_visit_cuts) %>%
+  filter(`visited in 4 days`=="Visited", clutch_visited_order>0,
+         !females_removed, num_at_init==1) %>%
+  group_by(location) %>%
+    mutate(n_moms = n()) %>%
+  ungroup() %>%
+  filter(n_moms==2) %>%
+  ggplot(data=., aes(x=mom_at_init, y=guard_duration)) +
+  geom_jitter(aes(color=first_visit_starts)) + 
+  theme_publilia() + 
+  scale_colour_gradientn(colours=rainbow(4)) +
+  xlab("initiator")
+
+visited_1st_4d_data_tb %>%
+  left_join(est_fecundity_strat_cats) %>%
+  left_join(first_visit_cuts) %>%
+  filter(`visited in 4 days`=="Visited", clutch_visited_order>0,
+         !females_removed, num_at_init==1) %>%
+  group_by(location) %>%
+    mutate(n_moms = n()) %>%
+  ungroup() %>%
+  filter(n_moms==2) %>%
+  ggplot(data=., aes(x=mom_at_init, y=guard_duration, group=location)) +
+  geom_line(aes(color=first_visit_starts)) + 
+  geom_point(size = 2) +
+  #geom_text(aes(color=mom_at_init), hjust=0, vjust=0) +
+  theme_publilia() + 
+  scale_colour_gradientn(colours=rainbow(4)) +
+  xlab("initiator")
+
+visited_1st_4d_data_tb %>%
+  left_join(est_fecundity_strat_cats) %>%
+  left_join(first_visit_cuts) %>%
+  filter(`visited in 4 days`=="Visited", clutch_visited_order>0,
+         !females_removed) %>%
+  group_by(location) %>%
+    mutate(n_moms = n()) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=mom_at_init, y=guard_duration, group=location)) +
+  geom_line(aes(color=n_moms)) + 
+  geom_point(size = 2) +
+  #geom_text(aes(color=mom_at_init), hjust=0, vjust=0) +
+  theme_publilia() + 
+  scale_colour_gradientn(colours=rainbow(4)) +
+  xlab("initiator")
+
+visited_1st_4d_data_tb %>%
+  left_join(est_fecundity_strat_cats) %>%
+  left_join(first_visit_cuts) %>%
+  filter(`visited in 4 days`=="Visited", clutch_visited_order>0,
+         !females_removed) %>%
+  group_by(location) %>%
+    mutate(n_moms = n()) %>%
+  ungroup() %>%
+  ggplot(data=., aes(x=mom_at_init, y=guard_duration, group=location)) +
+  geom_line(size=4, alpha=0.25) + 
+  geom_point(size = 2) +
+  #geom_text(aes(color=mom_at_init), hjust=0, vjust=0) +
+  theme_publilia() +
+  xlab("initiator")
+
+visited_1st_4d_data_tb %>%
+  left_join(est_fecundity_strat_cats) %>%
+  left_join(first_visit_cuts) %>%
+  filter(`visited in 4 days`=="Visited", clutch_visited_order>0,
+         !females_removed, num_at_init==1) %>%
+  group_by(location) %>%
+    mutate(n_moms = n()) %>%
+  ungroup() %>%
+  filter(n_moms==2) %>%
+  ggplot(data=., aes(x=mom_at_init, y=guard_duration, group=location)) +
+  geom_line(aes(color=first_visit_starts)) + 
+  geom_point(size = 2) +
+  #geom_text(aes(color=mom_at_init), hjust=0, vjust=0) +
+  theme_publilia() + 
+  scale_colour_gradientn(colours=rainbow(4)) +
+  xlab("initiator")
+
+# 
+visited_1st_4d_data_tb %>%
+  left_join(est_fecundity_strat_cats) %>%
+  left_join(first_visit_cuts) %>%
+  filter(`visited in 4 days`=="Visited") %>%
+  filter(!females_removed, ants_removed) %>%
+  group_by(location) %>%
+    mutate(n_moms = n()) %>%
+  ungroup() %>%
+  filter(n_moms==2) %>%
+ggplot(data=., aes(x=location, y = guard_duration, color=mom_at_init)) +
+  geom_point(alpha=0.50)
+  
+```
+
+What is the probability that a clutch will be guarded until hatching for clutches that were visited in the first four days vs. not visited? Could it be that there is a significant chance that a visiting female will adopt a clutch she visits?
+```{r}
+# no tie breaks
+visited_1st_4d_data %>%
+  filter(!females_removed, !is.na(initiation_date),
+         !(visit_ends<initiation_date), # visits that end before initiation are irrelevant
+         !(visit_starts>est_hatch+4)) %>% # there are a few cases where clutches are visited long after hatching, which wouldn't affect hatching success
+  left_join(first_visit_cuts) %>%
+  select(Female_ID:visit_ends, initiation_date, est_hatch, est_rel2h, 
+         `visited in 4 days`, mom_at_init, ants_removed, females_removed) %>%
+  group_by(location) %>%
+  filter(any(mom_at_init)) %>% # remove any clutches where there was no apparent mother at initiation
+  summarize(last_des_rel2h = max(ifelse(visit_starts<=initiation_date, est_rel2h, NA), na.rm=T),
+            first_des_rel2h_init = min(ifelse(mom_at_init, est_rel2h, NA), na.rm=T),
+            last_desert = ifelse(last_des_rel2h>=-2, "after hatch",
+                                 ifelse(last_des_rel2h<=0, "before hatch", NA)),
+            females_removed = first(females_removed),
+            ants_removed = first(ants_removed),
+            `visited in 4 days` = first(`visited in 4 days`),
+            init_desert_early = ifelse(first(first_des_rel2h_init<=-16), "deserted early", "didn't desert early")) %>%
+  ungroup() %>%
+  filter(!is.na(`visited in 4 days`)) %>% # E40_9 for some reason didn't get a valid visited in 4 days entry
+  filter(location!="A23_8") %>% # A23_8 has two moms at init but for some reason not `visited in 4 days`?
+ggplot(data=., aes(x=`visited in 4 days`, y=last_des_rel2h, fill = init_desert_early)) +
+  geom_boxplot(size = 1.5) +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  ylab("Latest desertion date relative to hatch") +
+  theme_publilia() #+
+  #facet_wrap(vars(ants_removed), nrow=1)
+```
+
+Can I do the same as above but looking at future fecundity or hatching success? This could be a big factor in why females desert when visited.
+```{r}
+# no tie breaks
+life_strats_firstlast_des <- visited_1st_4d_data %>%
+  filter(!females_removed, !is.na(initiation_date),
+         !(visit_ends<initiation_date), # visits that end before initiation are irrelevant
+         !(visit_starts>est_hatch+4)) %>% # there are a few cases where clutches are visited long after hatching, which wouldn't affect hatching success
+  left_join(first_visit_cuts) %>%
+  select(Female_ID:visit_ends, initiation_date, est_hatch, est_rel2h, 
+         `visited in 4 days`, mom_at_init, ants_removed, females_removed) %>%
+  group_by(location) %>%
+  filter(any(mom_at_init)) %>% # remove any clutches where there was no apparent mother at initiation
+  summarize(FemID_last_des_rel2h = # Picks one female if there is a tie, but that's ok
+              Female_ID[which.max(ifelse(visit_starts<=initiation_date, est_rel2h, NA))], 
+            FemID_first_des_rel2h_init =
+              Female_ID[which.min(ifelse(mom_at_init, est_rel2h, NA))],
+    last_des_rel2h = max(ifelse(visit_starts<=initiation_date, est_rel2h, NA), na.rm=T),
+            first_des_rel2h_init = min(ifelse(mom_at_init, est_rel2h, NA), na.rm=T),
+            last_desert = ifelse(last_des_rel2h>=-2, "after hatch",
+                                 ifelse(last_des_rel2h<=0, "before hatch", NA)),
+            females_removed = first(females_removed),
+            ants_removed = first(ants_removed),
+            `visited in 4 days` = first(`visited in 4 days`),
+            init_desert_early = ifelse(first(first_des_rel2h_init<=-16), "deserted early", "didn't desert early")) %>%
+  ungroup() %>%
+  filter(!is.na(`visited in 4 days`)) %>% # E40_9 for some reason didn't get a valid visited in 4 days entry
+  filter(location!="A23_8") # A23_8 has two moms at init but for some reason not `visited in 4 days`?
+
+life_strats_firstlast_des %>%
+ggplot(data=., aes(x=`visited in 4 days`, y=last_des_rel2h, fill = init_desert_early)) +
+  geom_boxplot() +
+  geom_point(pch = 21, position=position_jitterdodge(jitter.width=0.25), size=3) +
+  theme_publilia() #+
+  #facet_wrap(vars(ants_removed), nrow=1)
+
+
+est_fecundity_clutch_life_strats_firstlast_des <- visited_1st_4d_data_tb %>%
+  group_by(Female_ID) %>%
+  mutate(started_by_initiating =
+           any(clutch_visited_order==1&clutch_initiated_order==1)) %>%
+  ungroup() %>%
+  select(location, Female_ID, clutch_visited_order, clutch_initiated_order, desert_rel2h = est_rel2h,
+         mom_at_init, `visited in 4 days`, started_by_initiating) %>%
+  left_join(clutch_egg_num_data, by=c("location")) %>%
+  right_join(select(life_strats_firstlast_des,
+                    location, FemID_first_des_rel2h_init, first_des_rel2h_init,
+                    last_des_rel2h, init_desert_early),
+             by=c("Female_ID"="FemID_first_des_rel2h_init")) %>%
+  mutate(est_eggs_clutchS_sc2h = n_eggs*(initMb4h_sc2hS/mDb4h_sc2h),
+         est_eggs_clutchL_sc2h = n_eggs*(initMb4h_sc2hL/mDb4h_sc2h)) %>%
+  group_by(Female_ID) %>%
+    mutate(est_eggs_lifeL_sc2h = sum(est_eggs_clutchL_sc2h, na.rm = TRUE),
+           est_eggs_lifeS_sc2h = sum(est_eggs_clutchS_sc2h, na.rm = TRUE),
+           n_clutches_iv = n(),
+           n_initiated = sum(!is.na(clutch_initiated_order)),
+           n_visited = sum(!is.na(initiation_date)&is.na(clutch_initiated_order)),
+           n_feed = sum(is.na(initiation_date)),
+           init_visit_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "Initiated only"),
+                                           ifelse(!any(mom_at_init), "Visited only", NA)),
+           one_both_life_tactic = ifelse(any(mom_at_init), 
+                                           ifelse(any(!mom_at_init), "Both", "One"),
+                                           ifelse(!any(mom_at_init), "One", NA))) %>%
+  ungroup()
+  
+est_fecundity_life_strats <- est_fecundity_clutch %>%
+  group_by(Female_ID) %>%
+  # clutch visited order == 0 means she visited before initiation, so it shouldn't count
+  mutate(started_by =
+           ifelse(any(clutch_visited_order==1&!is.na(clutch_initiated_order)&clutch_initiated_order==1),
+                  "initiating",
+                  ifelse(any(clutch_visited_order==1&is.na(clutch_initiated_order)),
+                         "visiting", "other")),
+         n_clutches_with_eggs_iv = sum(!is.na(clutch_visited_order)&(clutch_visited_order>0), na.rm=T)) %>%
+  ungroup() %>%
+  right_join(select(life_strats_firstlast_des, -c(ants_removed, females_removed, `visited in 4 days`)), 
+             by=c("Female_ID"="FemID_first_des_rel2h_init")) %>%
+  filter(clutch_visited_order==1) %>%
+  mutate(desert_catL_v2 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hL <= -16, "desert",
+                                        ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4, "eggs", 
+                                               ifelse(desert_rel2hL >= 4,"nymphs",
+                                                      NA))),
+                                 ifelse(started_by=="visiting", "visit", 
+                                        NA)),
+         desert_catS_v2 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hS <= -16, "desert",
+                                        ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4, "eggs", 
+                                               ifelse(desert_rel2hS >= 4,"nymphs",
+                                                      NA))),
+                                 ifelse(started_by=="visiting", "visit", 
+                                        NA)),
+         desert_catL_v3 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hL <= -16, "desert",
+                                        ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4, "eggs", 
+                                               ifelse(desert_rel2hL >= 4,"nymphs",
+                                                      NA))),
+                                 init_visit_life_tactic),
+         desert_catS_v3 = ifelse(started_by=="initiating",
+                                 ifelse(desert_rel2hS <= -16, "desert",
+                                        ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4, "eggs", 
+                                               ifelse(desert_rel2hS >= 4,"nymphs",
+                                                      NA))),
+                                 init_visit_life_tactic),
+         first_clutch_visited_in4d = ifelse(started_by=="initiating",
+                                            ifelse(`visited in 4 days` == "Visited", "vis", "not"),
+                                            NA)) %>%
+  distinct(Female_ID, ants_removed, females_removed, `visited in 4 days`,
+           desert_catL_v2, desert_catL_v3, desert_catS_v2, desert_catS_v3,
+           started_by, init_visit_life_tactic, one_both_life_tactic,
+           first_clutch_visited_in4d, est_eggs_lifeL_sc2h, est_eggs_lifeS_sc2h,
+           n_clutches_with_eggs_iv)
+```
+
+
+Also, among females that start by visiting, do the ones that adopt that first clutch have lower lifetime fecundity than those that desert?
+```{r}
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data, location, Female_ID, 
+                   guard_duration, clutch_visited_order)%>%
+              filter(clutch_visited_order==1)) %>%
+  ggplot(data=., aes(x=desert_catS_v2, y=est_eggs_lifeS_sc2h)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(aes(fill=guard_duration), pch = 21, size=3, width=0.35) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) + 
+    scale_fill_gradientn(colours=rainbow(4))
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data, location, Female_ID, 
+                   guard_duration, clutch_visited_order)%>%
+              filter(clutch_visited_order==1)) %>%
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeL_sc2h)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(aes(fill=guard_duration), pch = 21, size=3, width=0.35) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) + 
+    scale_fill_gradientn(colours=rainbow(4))
+
+```
+
+I'm not sure what these figures mean. For females with more than one clutch, there may be a trade-off between the guarding duration on the first clutch you initiated (or visited) and your estimated lifetime fecundity, but only among females that stayed with their first nymphs. In other words, if you've stayed with your nymphs, staying longer will come at the cost of future fecundity. These regressions look suggestive, no significant, but I should check.
+
+Maybe there's too little data to tell, but it looks like females that start by visiting show a different pattern. For single-clutch females, staying longer does not increase lifetime fecundity, while for multi-clutch females, staying longer on the first clutch does increase fecundity. ??
+
+But not that there are some inconsistencies in this data, with some "deserters" guarding the first clutch for more than 4 days.
+```{r}
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data, location, Female_ID, 
+                   guard_duration, est_rel2h, clutch_visited_order)%>%
+              filter(clutch_visited_order==1)) %>%
+  ggplot(data=., aes(x=guard_duration, y=est_eggs_lifeL_sc2h, 
+                     color=desert_catL_v2, fill=desert_catL_v2)) +
+  geom_point(pch = 21, size=3) +
+  geom_smooth(method=lm) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) +
+  ggtitle("tbL")
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data_tb, location, Female_ID, 
+                   guard_duration, est_rel2h, clutch_visited_order, initL)%>%
+              filter(clutch_visited_order==1)) %>%
+  filter(initL|(desert_catL_v2=="visit")) %>%
+  ggplot(data=., aes(x=guard_duration, y=est_eggs_lifeL_sc2h, 
+                     color=desert_catL_v2, fill=desert_catL_v2)) +
+  geom_point(pch = 21, size=3) +
+  geom_smooth(method=lm) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) +
+  ggtitle("tbL")
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data_tb, location, Female_ID, 
+                   guard_duration, clutch_visited_order, initS)%>%
+              filter(clutch_visited_order==1, initS)) %>%
+  ggplot(data=., aes(x=guard_duration, y=est_eggs_lifeS_sc2h, 
+                     color=desert_catS_v2, fill=desert_catS_v2)) +
+  geom_point(pch = 21, size=3) +
+  geom_smooth(method=lm) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) +
+  ggtitle("tbS")
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data_tb, location, Female_ID, 
+                   guard_duration, est_rel2h, clutch_visited_order, initS)%>%
+              filter(clutch_visited_order==1)) %>%
+  filter(initS|(desert_catS_v2=="visit")) %>%
+  ggplot(data=., aes(x=guard_duration, y=est_eggs_lifeS_sc2h, 
+                     color=desert_catS_v2, fill=desert_catS_v2)) +
+  geom_point(pch = 21, size=3) +
+  geom_smooth(method=lm) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) +
+  ggtitle("tbS")
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data, location, Female_ID, 
+                   guard_duration, clutch_visited_order)%>%
+              filter(clutch_visited_order==1)) %>%
+  filter(desert_catL_v2!="visit") %>%
+  ggplot(data=., aes(x=guard_duration, y=est_eggs_lifeL_sc2h, 
+                     color=desert_catL_v2, fill=desert_catL_v2)) +
+  geom_point(pch = 21, size=3) +
+  geom_smooth(method=lm) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) +
+  ggtitle("tbL")
+
+est_fecundity_life_strats %>%
+  filter(!females_removed, ) %>%
+  left_join(select(visited_1st_4d_data, location, Female_ID, 
+                   guard_duration, clutch_visited_order)%>%
+              filter(clutch_visited_order==1)) %>%
+  filter(desert_catS_v2!="visit") %>%
+  ggplot(data=., aes(x=guard_duration, y=est_eggs_lifeS_sc2h, 
+                     color=desert_catS_v2, fill=desert_catS_v2)) +
+  geom_point(pch = 21, size=3) +
+  geom_smooth(method=lm) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1) +
+  ggtitle("tbS")
+
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  left_join(select(visited_1st_4d_data, location, Female_ID, 
+                   guard_duration, clutch_visited_order)%>%
+              filter(clutch_visited_order==1)) %>%
+  filter(desert_catL_v2=="visit") %>%
+  ggplot(data=., aes(x=guard_duration, y=est_eggs_lifeL_sc2h, 
+                     color=desert_catL_v2, fill=desert_catL_v2)) +
+  geom_point(pch = 21, size=3) +
+  geom_smooth(method=lm) +
+  ylab(expression(paste("Estimated lifetime fecundity (eggs) ", italic("sensu moi"))))  +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1)
+
+
+```
+
+quick stats for qcb talk figure
+```{r}
+est_fecundity_life_strats %>%
+  filter(!females_removed) %>%
+  ggplot(data=., aes(x=desert_catL_v2, y=est_eggs_lifeS_sc2h, fill=desert_catL_v2)) +
+  geom_boxplot(position = position_dodge(0.75), size = 1.5, outlier.shape=NA) +
+  geom_jitter(pch = 21, size=3, width=0.35) +
+  ylab("Estimated lifetime fecundity (eggs)")  +
+  xlab("Reproductive strategy for first clutch") +
+  theme_publilia() +
+  facet_wrap(vars(n_clutches_with_eggs_iv>1), nrow=1)
+
+est_fecundity_life_strats_semel.data <- est_fecundity_life_strats %>%
+  filter(!females_removed, n_clutches_with_eggs_iv==1)
+
+est_fecundity_life_strats_semel.aov <- est_fecundity_life_strats_semel.data %>% anova_test(est_eggs_lifeS_sc2h ~ desert_catL_v2)
+est_fecundity_life_strats_semel.aov
+
+est_fecundity_life_strats_semel.tukey <- est_fecundity_life_strats_semel.data %>% tukey_hsd(est_eggs_lifeS_sc2h ~ desert_catL_v2)
+
+
+est_fecundity_life_strats_itero.data <- est_fecundity_life_strats %>%
+  filter(!females_removed, n_clutches_with_eggs_iv>1)
+
+est_fecundity_life_strats_itero.aov <- est_fecundity_life_strats_itero.data %>% anova_test(est_eggs_lifeS_sc2h ~ desert_catL_v2)
+est_fecundity_life_strats_itero.aov
+
+est_fecundity_life_strats_itero.tukey <- est_fecundity_life_strats_itero.data %>% tukey_hsd(est_eggs_lifeS_sc2h ~ desert_catL_v2)
+```
+
+
+
+# 3 - First, future and lifetime fecundity
+```{r}
+
+```
+

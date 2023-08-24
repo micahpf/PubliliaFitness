@@ -1,0 +1,2331 @@
+---
+title: "Publilia_2019_CHAPTER-2A-fecundity-model"
+author: "micah fletcher"
+date: "1/18/2022"
+output: html_document
+---
+
+# Publilia 2019 Chapter - Script 2A: modeling fecundity
+This is meant to consolidate previous scripts and provide a readable and reproducible record of the analyses for the Publilia Chapter.
+
+2) *Fecundity:* No support for trade-off between current care and future fecundity
+  - *Dataset B [supp: modeling fecundity ~ guarding]* requirements:
+    - Guarding durations of ALL females that visited a clutch are accurate.
+      - Cannot exclude any females, including unmarked or ambiguously marked females, because I need them for the sum of guarding time.
+    - Maximum number of eggs per clutch is accurate.
+    - Can partition 
+      - early clutches vs. later clutches
+      - single-mother clutches vs. multiple-mother clutches
+      - ants vs. no ants
+  - *Dataset C [estimating fecundity]* requirements:
+    - Guarding durations of ALL females that visited a clutch are accurate.
+      - Cannot exclude any females, including unmarked or ambiguously marked females, because I need them for the sum of guarding time.
+    - Maximum number of eggs per clutch is accurate.
+    - Numbers of clutches per female (and guarding duration and eggs for each) are accurate.
+      - Cannot exclude any clutches, including those with ambiguous initiators, or unknown hatch dates
+    - Models/heuristics of focal female contribution to clutch are clearly defined and sensible.
+      1) simple equal proportion of days
+      2) equal proportion of days with "intercept" given to the initiator
+      3) unequal proportion of days for initiator(s) vs visitors, with intercept also given to the initiator
+      4) Reproducing Zink's fecundity
+
+# 0 - Data import
+```{r}
+library(MASS)
+library(tidyverse)
+library(mgcv)
+select <- dplyr::select
+```
+
+
+# 1 - Data prep
+```{r}
+clutch_status_guarding_summary_v2
+
+fec_model_data <- visited_1st_4d_data_tb %>%
+  filter(!is.na(guard_duration)) %>%
+  group_by(location) %>%
+  mutate(eggs_ever_visited = any(!mom_at_init & visit_ends <= est_hatch)) %>%
+  ungroup() %>%
+  select(Female_ID, location, guard_duration, est_rel2h, initiation_date, est_hatch,
+         mom_at_init, clutch_initiated_order, initL, initS,
+         visit_starts, visit_ends, last_day_fID,
+         num_at_init, n_clutches_on_plant, `visited in 4 days`, eggs_ever_visited, ants,
+         females_removed, ants_removed, 
+         max_egg_num, egg_fate, egg_fate_date)
+
+
+fec_model_data %>% filter(females_removed, mom_at_init) %>% nrow()
+fec_model_data %>% filter(females_removed, mom_at_init) %>% count(eggs_ever_visited)
+fec_model_data %>% filter(females_removed, mom_at_init) %>% count(eggs_ever_visited, visit_ends==last_day_fID)
+
+ggplot(data=filter(fec_model_data, females_removed, mom_at_init, visit_ends==last_day_fID), 
+       aes(x=guard_duration, y=max_egg_num)) +
+  geom_point(aes(color=eggs_ever_visited | num_at_init>1), size = 4, alpha = 0.50) +
+  theme(legend.position = "bottom")
+        
+ggplot(data=filter(fec_model_data, mom_at_init, visit_ends==last_day_fID), 
+       aes(x=guard_duration, y=max_egg_num, color=eggs_ever_visited | num_at_init>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth() +
+  theme(legend.position = "bottom")
+ 
+ggplot(data=filter(fec_model_data, mom_at_init, visit_ends==last_day_fID, 
+                   initiation_date<as_date("2019-06-15")), 
+       aes(x=guard_duration, y=max_egg_num, color=eggs_ever_visited | num_at_init>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth() +
+  theme(legend.position = "bottom")
+
+ggplot(data=filter(fec_model_data, mom_at_init, visit_ends==last_day_fID,
+                   initiation_date<as_date("2019-06-15")), 
+       aes(x=guard_duration, y=max_egg_num, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth() +
+  theme(legend.position = "bottom")
+
+ggplot(data=filter(fec_model_data, females_removed, mom_at_init, visit_ends==last_day_fID,
+                   initiation_date<as_date("2019-06-15")), 
+       aes(x=guard_duration, y=max_egg_num, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth() +
+  theme(legend.position = "bottom")
+
+ggplot(data=filter(fec_model_data, females_removed, mom_at_init, visit_ends==last_day_fID,), 
+       aes(x=guard_duration, y=max_egg_num, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=lm) +
+  theme(legend.position = "bottom")
+
+ggplot(data=filter(fec_model_data, females_removed, mom_at_init, visit_ends==last_day_fID,
+                   !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)), 
+       aes(x=guard_duration, y=max_egg_num, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=lm) +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+# plotting the actual number of eggs over time to look for outliers
+fec_model_data %>% filter(females_removed, mom_at_init, visit_ends==last_day_fID,
+                   !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+         filter(guard_duration<7, max_egg_num>60)
+
+clutch_status_init_hatch_labels_v1 %>% filter(location == "D77_11") %>% print(n=Inf) # this is definitely an outlier!
+ggplot(clutch_status_init_hatch_labels_v1 %>% filter(location == "D77_11", !is.na(egg_num)),
+       aes(x=Date,y=egg_num)) +
+  geom_point() +
+  geom_smooth()
+
+clutch_status_init_hatch_labels_v1 %>% filter(location == "G32_8") %>% print(n=Inf) # this is definitely an outlier!
+ggplot(clutch_status_init_hatch_labels_v1 %>% filter(location == "G32_8", !is.na(egg_num)),
+       aes(x=Date,y=egg_num)) +
+  geom_point() +
+  geom_smooth()
+
+clutch_status_init_hatch_labels_v1 %>% filter(location == "G55_9") %>% print(n=Inf) # this is definitely an outlier!
+ggplot(clutch_status_init_hatch_labels_v1 %>% filter(location == "G55_9", !is.na(egg_num)),
+       aes(x=Date,y=egg_num)) +
+  geom_point() +
+  geom_smooth()
+
+clutch_status_init_hatch_labels_v1 %>% filter(location == "G67_10") %>% print(n=Inf) # this is definitely an outlier!
+ggplot(clutch_status_init_hatch_labels_v1 %>% filter(location == "G67_10", !is.na(egg_num)),
+       aes(x=Date,y=egg_num)) +
+  geom_point() +
+  geom_smooth()
+
+clutch_status_init_hatch_labels_v1 %>% filter(location == "H19_8") %>% print(n=Inf) # this is definitely an outlier!
+ggplot(clutch_status_init_hatch_labels_v1 %>% filter(location == "H19_8", !is.na(egg_num)),
+       aes(x=Date,y=egg_num)) +
+  geom_point() +
+  geom_smooth()
+
+# This stuff takes too long to run
+# clutch_status_init_hatch_labels_v1 %>%
+#   filter(grepl("H",location), !is.na(egg_num)) %>%
+#   ggplot(aes(x=Date,y=egg_num)) +
+#   geom_point() +
+#   geom_smooth() +
+#   facet_wrap(vars(location))
+#   
+# clutch_status_init_hatch_labels_v1 %>%
+#   filter(grepl("G",location), !is.na(egg_num)) %>%
+#   ggplot(aes(x=Date,y=egg_num)) +
+#   geom_point() +
+#   geom_smooth() +
+#   facet_wrap(vars(location))
+# 
+# clutch_status_init_hatch_labels_v1 %>%
+#   filter(grepl("A",location), !is.na(egg_num)) %>%
+#   ggplot(aes(x=Date,y=egg_num)) +
+#   geom_point() +
+#   geom_smooth() +
+#   facet_wrap(vars(location))
+# 
+# clutch_status_init_hatch_labels_v1 %>%
+#   filter(grepl("B",location), !is.na(egg_num)) %>%
+#   ggplot(aes(x=Date,y=egg_num)) +
+#   geom_point() +
+#   geom_smooth() +
+#   facet_wrap(vars(location))
+# 
+# clutch_status_init_hatch_labels_v1 %>%
+#   left_join(fec_model_data) %>%
+#   filter(females_removed, mom_at_init, visit_ends==last_day_fID,
+#          !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1), 
+#          !is.na(egg_num)) %>%
+#   ggplot(aes(x=Date,y=egg_num)) +
+#   geom_point() +
+#   geom_smooth() +
+#   facet_wrap(vars(location))
+# 
+# clutch_status_init_hatch_labels_v1 %>%
+#   left_join(fec_model_data) %>%
+#   filter(mom_at_init, visit_ends==last_day_fID,
+#          !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1), 
+#          !is.na(egg_num)) %>%
+#   ggplot(aes(x=Date-initiation_date,y=egg_num)) +
+#   geom_point() +
+#   geom_smooth(color="black",se=F) +
+#   facet_wrap(vars(location)) +
+#   theme(legend.position="bottom")
+# 
+# clutch_status_init_hatch_labels_v1 %>%
+#   left_join(fec_model_data) %>%
+#   filter(mom_at_init, visit_ends==last_day_fID,
+#          eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1, 
+#          !is.na(egg_num)) %>%
+#   ggplot(aes(x=Date-initiation_date,y=egg_num)) +
+#   geom_point() +
+#   geom_smooth(color="purple",se=F) +
+#   facet_wrap(vars(location)) +
+#   theme(legend.position="bottom")
+
+```
+
+taking the median (or mean) of the top 4 egg_num counts yields an estimate of max egg num that is more robust to outliers/miscounts
+```{r}
+# can I deal with outliers by taking the median of the max 3 points for each clutch?
+tmp_t5eggs_data <- clutch_status_init_hatch_labels_v1 %>%
+  mutate(est_hatch = as_date(ifelse(is.na(hatch_date),
+                                 initiation_date + 20,
+                                 hatch_date)),
+         clutch_age = as.numeric(Date-initiation_date)) %>%
+  # remove duplicate egg counts due to multiple females at a location on a day
+  distinct(location, Date, initiation_date, est_hatch, clutch_age,
+           egg_num, egg_len) %>%
+  group_by(location) %>%
+    arrange(desc(egg_num)) %>%
+    mutate(top5egg_counts = rank(desc(egg_num), ties.method = "first") <= 5,
+           top5egg_lens = rank(desc(egg_len), ties.method = "first") <= 5) %>%
+    #filter(location == "A13_11") %>%
+    select(location, Date, initiation_date, est_hatch, clutch_age,
+           egg_num, egg_len, top5egg_counts, top5egg_lens) %>%
+    mutate(med_t5eggs = median(ifelse(top5egg_counts,egg_num,NA), na.rm=T),
+           mean_t5eggs = mean(ifelse(top5egg_counts,egg_num,NA), na.rm=T),
+           max_n_eggs = max(ifelse(top5egg_counts,egg_num,NA), na.rm=T),
+           med_l_t5eggs = median(ifelse(top5egg_lens,egg_len,NA), na.rm=T),
+           mean_l_t5eggs = mean(ifelse(top5egg_lens,egg_len,NA), na.rm=T),
+           max_l_eggs = max(ifelse(top5egg_lens,egg_len,NA), na.rm=T)) %>%
+  ungroup()
+  
+tmp_t5eggs_data %>% 
+  filter(grepl("B",location), !is.na(egg_num)) %>%
+ggplot(data=., 
+       aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  geom_hline(aes(yintercept = max_n_eggs), color = "blue") +
+  geom_hline(aes(yintercept = med_t5eggs), color = "green") +
+  geom_hline(aes(yintercept = mean_t5eggs), color = "red") +
+  geom_vline(aes(xintercept = est_hatch-initiation_date), color = "gray", linetype="dotted") +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+
+top5eggs_summary <- tmp_t5eggs_data %>%
+  group_by(location) %>%
+    summarize(med_t5eggs = first(med_t5eggs),
+              mean_t5eggs = first(mean_t5eggs),
+              max_n_eggs = first(max_n_eggs),
+              med_l_t5eggs = first(med_l_t5eggs),
+              mean_l_t5eggs = first(mean_l_t5eggs),
+              max_l_eggs = first(max_l_eggs)) %>%
+  ungroup()
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(females_removed, mom_at_init, visit_ends==last_day_fID,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=max_n_eggs, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50, color="red") +
+  geom_smooth(method=lm, color="red", fill="red") +
+  geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.50, color="blue") +
+  geom_smooth(aes(y=med_t5eggs), method=lm, color="blue", fill="blue") +
+  geom_point(aes(y=mean_t5eggs), size = 4, alpha = 0.50, color="green") +
+  geom_smooth(aes(y=mean_t5eggs), method=lm, color="green", fill="green") +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init, visit_ends==last_day_fID,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=max_n_eggs, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50, color="red") +
+  geom_smooth(method=loess, color="red", fill="red") +
+  geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.50, color="blue") +
+  geom_smooth(aes(y=med_t5eggs), method=loess, color="blue", fill="blue") +
+  geom_point(aes(y=mean_t5eggs), size = 4, alpha = 0.50, color="green") +
+  geom_smooth(aes(y=mean_t5eggs), method=loess, color="green", fill="green") +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=max_n_eggs, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50, color="red") +
+  geom_smooth(method=loess, color="red", fill="red") +
+  geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.50, color="blue") +
+  geom_smooth(aes(y=med_t5eggs), method=loess, color="blue", fill="blue") +
+  geom_point(aes(y=mean_t5eggs), size = 4, alpha = 0.50, color="green") +
+  geom_smooth(aes(y=mean_t5eggs), method=loess, color="green", fill="green") +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=max_n_eggs, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50, color="red") +
+  geom_smooth(method=loess, color="red", fill="red") +
+  geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.50, color="blue") +
+  geom_smooth(aes(y=med_t5eggs), method=loess, color="blue", fill="blue") +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init, !is.na(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs, 
+           color=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1,
+           fill=eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom")
+```
+
+
+
+
+basic gam
+```{r}
+tmp4gam <- fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1))
+
+plot(x=tmp4gam$guard_duration, y=tmp4gam$med_t5eggs)
+
+tmp4gam_mod <- fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+  gam(med_t5eggs ~ s(guard_duration), data=.)
+
+plot(tmp4gam_mod)
+```
+
+
+
+can I take the slope of each 2-day segment of a loess regression of the egg counts and assign those to the females that were present at the time? that would be more faithful to the estimating I'm trying to do.
+
+it feels elegant, but it also puts too much faith in the individual counts of eggs, especially when you consider the fact that many counts increase even after all females have been removed. how would you account for that? I think that is too presumptuous to pursue with this data full of measurement error
+```{r}
+tmp_t5eggs_data_loess <- tmp_t5eggs_data %>% 
+  filter(grepl("G",location)|grepl("F",location), !is.na(egg_num)) %>%
+  #filter(location=="G5_6", !is.na(egg_num)) %>%
+  mutate(clutch_age = as.numeric(Date-initiation_date)) %>%
+  group_by(location) %>%
+  filter(n()>1) %>% # loess cannot be run on a single value of x
+  #do(model=loess(egg_num ~ clutch_age, data=.)) %>%
+  do(modelr::add_predictions(model=loess(egg_num ~ clutch_age, data=.),
+                             data=.)) %>%
+  arrange(location,clutch_age) %>%
+  mutate(loess_step = pred - lag(pred, order_by=clutch_age))
+
+ggplot(data=tmp_t5eggs_data %>% filter(location=="G69_10", !is.na(egg_num)), 
+       aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  geom_hline(aes(yintercept = max_n_eggs), color = "blue") +
+  geom_hline(aes(yintercept = med_t5eggs), color = "green") +
+  geom_hline(aes(yintercept = mean_t5eggs), color = "red") +
+  geom_vline(aes(xintercept = est_hatch-initiation_date), color = "gray", linetype="dotted") +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+
+ggplot(data=tmp_t5eggs_data_loess %>% filter(location=="G69_10", !is.na(egg_num)), 
+       aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  geom_line(aes(x = clutch_age, y = pred), color = "blue") +
+  geom_hline(aes(yintercept = med_t5eggs), color = "green") +
+  geom_hline(aes(yintercept = mean_t5eggs), color = "red") +
+  geom_vline(aes(xintercept = est_hatch-initiation_date), color = "gray", linetype="dotted") +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+
+#View(tmp_t5eggs_data_loess)
+
+clutch_status_init_hatch_labels_v1 %>%
+  left_join(tmp_t5eggs_data_loess)
+
+#plot_clutch_num("G13_6")
+
+```
+
+can I faithfully estimate the egg laying rate of lone females with `mean_t5eggs / visit_ends-initiation_date` and a y-intercept of 0 and initiation_date-1?
+```{r}
+est_ov_rates <- fec_model_data %>% 
+  filter(females_removed, mom_at_init, visit_ends==last_day_fID,
+         !(eggs_ever_visited|num_at_init>1)) %>%
+  filter(grepl("G",location)|grepl("F",location)) %>%
+  left_join(tmp_t5eggs_data_loess) %>%
+  distinct(Female_ID, location, mean_t5eggs, visit_ends, initiation_date) %>%
+  group_by(location) %>%
+  # +1 because this is the number of days the female was present, not the interval
+  mutate(est_ov_rate = mean_t5eggs/as.numeric(visit_ends-initiation_date))
+
+fec_model_data %>% 
+  filter(females_removed, mom_at_init, visit_ends==last_day_fID,
+         !(eggs_ever_visited|num_at_init>1)) %>%
+  filter(grepl("G",location)|grepl("F",location)) %>%
+  left_join(tmp_t5eggs_data_loess) %>%
+ggplot(data=., aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  geom_line(aes(x = clutch_age, y = pred), color = "blue") +
+  geom_hline(aes(yintercept = med_t5eggs), color = "green") +
+  geom_hline(aes(yintercept = mean_t5eggs), color = "red") +
+  geom_vline(aes(xintercept = est_hatch-initiation_date), color = "gray", linetype="dotted") +
+  geom_abline(data=est_ov_rates, aes(slope=est_ov_rate,intercept=-1)) +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+
+
+fec_model_data %>% 
+  filter(females_removed, mom_at_init, visit_ends==last_day_fID) %>%
+  left_join(tmp_t5eggs_data) %>%
+  distinct(Female_ID, location, mean_t5eggs, visit_ends, initiation_date, .keep_all=T) %>%
+  group_by(location) %>%
+  # +1 because this is the number of days the female was present, not the interval
+  mutate(est_ov_rate = mean_t5eggs/as.numeric(visit_ends-initiation_date)) %>%
+  ggplot() +
+  geom_jitter(aes(y=est_ov_rate, x=eggs_ever_visited|num_at_init>1, group=eggs_ever_visited|num_at_init>1,
+    color=eggs_ever_visited|num_at_init>1)) +
+  theme(legend.position = "bottom")
+
+
+
+```
+
+quickly looking at ovary data
+```{r}
+# fec_model_data %>% 
+#   left_join(tmp_t5eggs_data) %>%
+#   distinct(Female_ID, location, mean_t5eggs, visit_ends, initiation_date, .keep_all=T) %>%
+#   group_by(location) %>%
+#   # +1 because this is the number of days the female was present, not the interval
+#   mutate(est_ov_rate = mean_t5eggs/as.numeric(visit_ends-initiation_date)) %>%
+#   full_join(ovary_data_w_counts, by = c("Female_ID")) %>%
+#   filter(females_removed, mom_at_init, visit_ends==last_day_fID,
+#          eggs_ever_visited|num_at_init>1,
+#          est_ov_rate<=20) %>%
+#   ggplot(data=., 
+#          aes(x=n_ovarioles/pronotum_len, y=est_ov_rate)) +
+#   geom_point() +
+#   geom_smooth(method=lm)
+# 
+# fec_model_data %>% 
+#   left_join(tmp_t5eggs_data) %>%
+#   distinct(Female_ID, location, mean_t5eggs, visit_ends, initiation_date, .keep_all=T) %>%
+#   group_by(location) %>%
+#   # +1 because this is the number of days the female was present, not the interval
+#   mutate(est_ov_rate = mean_t5eggs/as.numeric(visit_ends-initiation_date)) %>%
+#   full_join(ovary_data_w_counts, by = c("Female_ID")) %>%
+#   filter(females_removed, mom_at_init,
+#          eggs_ever_visited|num_at_init>1,
+#          est_ov_rate<=20) %>%
+#   ggplot(data=., 
+#          aes(x=n_ovarioles/pronotum_len, y=est_ov_rate)) +
+#   geom_point() +
+#   geom_smooth(method=lm)
+
+```
+
+
+
+# 2 - Dataset B: modeling fecundity ~ guarding (supp)
+From draft of text:
+The final number of eggs in a clutch was highly correlated with the duration a female guarded them prior to hatching (Figure S2), indicating that females continue to lay eggs over time as they guard them. This pattern holds when females were forcibly removed (Figure S2), confirming that females are not depositing a lump sum of eggs at initiation and staying longer with larger clutches as suggested in other treehoppers (Olmstead and Wood 198X). The sum of all females’ egg-guarding durations was more predictive of final clutch size than egg guarding duration of the initiator alone (Table S1 with alternative models and their AICs), showing that females lay eggs while visiting existing clutches. Many females that started the season by laying in existing clutches went on to initiate their own clutches later in the season (Figure S3).
+
+`The final number of eggs in a clutch was highly correlated with the duration a female guarded them prior to hatching (Figure S2), indicating that females continue to lay eggs over time as they guard them.`
+
+For this I want a model and R^2 value, plus a supplemental figure showing the data with the fitted model. 
+ - I want to look at single females with no other visitors interfering or adding eggs of their own. Thus, I use only the females on clutches that were (1) never observed being visited (including multiple initiators), and (2) were alone on the plant (reducing the chance of including undetected visitors). 
+ - Clutches from both the control and female removal treatments are included so that we can include more intermediate durations that are rare under control conditions. 
+ - Show/mention in some way that ants have no significant effect on these relationships.
+```{r}
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs, 
+           color=n_clutches_on_plant>1,fill=n_clutches_on_plant>1)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom")
+
+t5eggs_gdur_loneFs.data <- fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1))
+
+ggplot(data=t5eggs_gdur_loneFs.data, 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(size = 4, alpha = 0.50) +
+  theme(legend.position = "bottom")
+
+t5eggs_gdur_loneFs.lm <- gam(med_t5eggs ~ guard_duration,
+                             data = t5eggs_gdur_loneFs.data)
+summary(t5eggs_gdur_loneFs.lm)
+#visreg(t5eggs_gdur_loneFs.lm, "guard_duration", gg=TRUE)
+
+t5eggs_gdur_loneFs.glm_pois <- glm(med_t5eggs ~ guard_duration, family = poisson,
+                             data = t5eggs_gdur_loneFs.data)
+summary(t5eggs_gdur_loneFs.glm_pois)
+#visreg(t5eggs_gdur_loneFs.glm_pois, "guard_duration", gg=TRUE)
+
+t5eggs_gdur_loneFs.gam_pois <- gam(med_t5eggs ~ s(guard_duration, bs="cr"), family = poisson,
+                             data = t5eggs_gdur_loneFs.data)
+summary(t5eggs_gdur_loneFs.gam_pois)
+plot(t5eggs_gdur_loneFs.gam_pois)
+#visreg(t5eggs_gdur_loneFs.gam_pois, "guard_duration", gg=TRUE)
+```
+
+`This pattern holds when including only females that were forcibly removed from their clutches (Figure S2), confirming that females are not depositing a lump sum of eggs at initiation and staying longer with larger clutches as suggested in other treehoppers (Olmstead and Wood 198X).`
+I'm not certain this is necessary. If I want to demonstrate convincingly that they are depositing eggs over time, I could simply show the plots of different lone females on clutches with egg numbers growing over time?
+```{r}
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init, females_removed, visit_ends==last_day_fID,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=lm) +
+  theme(legend.position = "bottom")
+
+# without the potential outliers potentially representing undetected visits
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init, females_removed, visit_ends==last_day_fID,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1),
+         !(guard_duration<7&med_t5eggs>50)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=lm) +
+  theme(legend.position = "bottom")
+
+```
+
+`The sum of all females’ egg-guarding durations was more predictive of final clutch size than egg guarding duration of the initiator alone (Table S1 with alternative models and their AICs), showing that females lay eggs while visiting existing clutches.`
+```{r}
+visited_1st_4d_data_tb
+visited_1st_4d_data_tb %>% filter(!is.na(initiation_date))
+visited_1st_4d_data_tb %>% filter(!is.na(initiation_date), !is.na(num_at_init))
+
+##### initiator guarding time: mDb4h
+initiator_days_b4hatch <- visited_1st_4d_data_tb %>%
+  filter(!is.na(initiation_date),
+         # exclude clutches for which the initiators are not known
+         !is.na(num_at_init),
+         mom_at_init) %>%
+  group_by(row_number()) %>%
+  # Use median init to hatch interval (20 days) to est hatch date of clutch with no hatch date
+  mutate(init_dur = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+                           visit_ends-initiation_date+1, 
+                           NA),
+         initMb4hatch = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+           min(est_hatch, visit_ends) - 
+           max(initiation_date, visit_starts) + 1,
+           ifelse(visit_starts > est_hatch | visit_ends < initiation_date,
+                  NA,
+                  NA)),
+         initMb4h_sc2h = initMb4hatch/as.numeric((est_hatch-initiation_date+1))) %>%
+  ungroup()
+
+initMb4h_tbL <- initiator_days_b4hatch %>%
+  filter(initL) %>%
+  select(location, desert_rel2hL=est_rel2h, init_durL=init_dur, initMb4h_tbL=initMb4hatch, initMb4h_sc2hL=initMb4h_sc2h,
+         females_removed, ants_removed, initiation_date, num_at_init,
+         initiator_tbL=Female_ID, n_clutches_on_plant)
+
+initMb4h_tbS <- initiator_days_b4hatch %>%
+  filter(initS) %>%
+  select(location, desert_rel2hS=est_rel2h, init_durS=init_dur, initMb4h_tbS=initMb4hatch, initMb4h_sc2hS=initMb4h_sc2h,
+         females_removed, ants_removed, initiation_date, num_at_init,
+         initiator_tbS=Female_ID, n_clutches_on_plant)
+
+##### proportional time: mDb4h
+clutch_momDays_b4h <- visited_1st_4d_data_tb  %>%
+  # exclude visits to leaves that never had eggs; only interested in clutches
+  filter(!is.na(initiation_date),
+         # exclude clutches for which the initiators are not known (why?)
+         !is.na(num_at_init)) %>%
+  group_by(row_number()) %>%
+  # Use median init to hatch interval (20 days) to est hatch date of clutch with no hatch date
+  mutate(mD = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+                     visit_ends-initiation_date+1,
+                     NA),
+         days_guard_b4hatch = ifelse(min(est_hatch, visit_ends) - 
+                                       max(initiation_date, visit_starts) >= 0,
+           min(est_hatch, visit_ends) - 
+           max(initiation_date, visit_starts) + 1,
+           ifelse(visit_starts > est_hatch | visit_ends < initiation_date,
+                  NA,
+                  NA))) %>%
+  ungroup() %>%
+  group_by(location) %>%
+    summarize(sum_mD = sum(mD, na.rm=T),
+              sum_vD = sum(mD*!mom_at_init, na.rm=T),
+              sum_gD = sum(mD*mom_at_init, na.rm=T),
+              vDb4h_sc2h = sum(days_guard_b4hatch*!mom_at_init, na.rm = T)/
+                # scale to init-hatch interval so clutches with different intervals are comparable 
+                as.numeric(first(est_hatch)-first(initiation_date)+1),
+              gDb4h_sc2h = sum(days_guard_b4hatch*mom_at_init, na.rm = T)/
+                as.numeric((first(est_hatch)-first(initiation_date)+1)),
+              mDb4h_sc2h = sum(days_guard_b4hatch, na.rm = T)/
+                as.numeric((first(est_hatch)-first(initiation_date)+1))) %>%
+  ungroup()
+
+clutch_status_momDays_b4h <- visited_1st_4d_data_tb %>%
+  distinct(location, initiation_date, hatch_date, num_at_init,
+           females_removed, ants_removed, egg_fate, egg_fate_date,
+           max_egg_num, max_egg_len, `visited in 4 days`) %>%
+  right_join(clutch_momDays_b4h, by=c("location")) %>%
+  left_join(top5eggs_summary)
+
+#### combine the two
+clutch_egg_num_data <- initMb4h_tbL %>%
+  left_join(initMb4h_tbS) %>%
+  separate(location, sep = "_", into = c("DormPlant"),  remove = FALSE, extra = "drop") %>%
+  left_join(select(clutch_status_momDays_b4h, location, sum_mD, sum_vD, sum_gD,
+                   mDb4h_sc2h, gDb4h_sc2h, vDb4h_sc2h, max_egg_num, max_egg_len,
+                   `visited in 4 days`)) %>%
+  # if tbL and tbS are not the same female, add the female that lost the tie-break to the total sum of visit days
+  mutate(sum_vD_initL = ifelse(initiator_tbL!=initiator_tbS,
+                           sum_vD+init_durS, sum_vD),
+         sum_vD_initS = ifelse(initiator_tbS!=initiator_tbL,
+                           sum_vD+init_durL, sum_vD),
+         visited = vDb4h_sc2h > 0,
+         pmDvD = vDb4h_sc2h/mDb4h_sc2h) %>%
+  left_join(top5eggs_summary) %>%
+  select(location, init_durL, init_durS, desert_rel2hL, desert_rel2hS,
+         sum_mD, sum_vD, sum_gD, sum_vD_initL, sum_vD_initS, 
+         initMb4h_sc2hL, initMb4h_sc2hS, mDb4h_sc2h,
+         females_removed, ants_removed, initiation_date, num_at_init, 
+         `visited in 4 days`,
+         n_eggs = max_egg_num, med_t5eggs, mean_t5eggs, max_n_eggs,
+         max_egg_len, med_l_t5eggs, mean_l_t5eggs, max_l_eggs,
+         initiator_tbL, initiator_tbS, n_clutches_on_plant, 
+         visited, pmDvD, DormPlant)
+```
+
+```{r}
+clutch_egg_num_data %>%
+  filter(!is.na(initMb4h_sc2hL)) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=initMb4h_sc2hL)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  filter(!is.na(initMb4h_sc2hL)) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=init_durL)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=lm) +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  filter(!is.na(init_durL)) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=init_durL, color=sum_vD_initL>0)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  filter(!is.na(mDb4h_sc2h)) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=mDb4h_sc2h, color=visited)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  filter(!is.na(sum_mD)) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=sum_mD, color=visited)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  filter(!is.na(sum_mD)) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=sum_mD, color=sum_vD)) +
+  geom_point(size = 4, alpha = 0.75) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom") + 
+    scale_colour_gradientn(colours=rainbow(4))
+
+clutch_egg_num_data %>%
+  filter(!is.na(sum_mD)) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=sum_gD, color=sum_vD)) +
+  geom_point(size = 4, alpha = 0.75) +
+  geom_smooth(method=loess) +
+  theme(legend.position = "bottom") + 
+    scale_colour_gradientn(colours=rainbow(4))
+
+# The palette with grey:
+Palette <- c("red", "orange", "yellow", "green", "blue", "purple")
+
+clutch_egg_num_data %>%
+  filter(!is.na(init_durL)) %>%
+  mutate(visit_cuts = cut(sum_vD, breaks=c(0,4,8,12,16,20,80))) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=init_durL, color=visit_cuts)) +
+  geom_point(size = 4, alpha = 0.75) +
+  geom_smooth(method=lm, se=F) +
+  theme(legend.position = "bottom") + 
+    scale_colour_manual(values=Palette)
+
+# with corrected sum_vD(_initL)
+clutch_egg_num_data %>%
+  filter(!is.na(init_durL)) %>%
+  mutate(visit_cuts = cut(sum_vD_initL, breaks=c(0,4,8,12,16,20,80))) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=init_durL, color=visit_cuts)) +
+  geom_point(size = 4, alpha = 0.75) +
+  geom_smooth(method=lm, se=F) +
+  theme(legend.position = "bottom") + 
+    scale_colour_manual(values=Palette)
+```
+
+### Next steps:
+ - run model fits for initL (and initS) and mD and compare in figures and tables (perhaps gam better than glm?)
+ - decide on which model params to include and what data filtering to do
+ - decide whether to refine the way we calculate visit days when dealing with tie-breaks
+ - move on the estimates
+ - how well can we approximate the data using simple regressions and simple heuristics for estimating fecundity?
+  - can I plot the estimated egg contributions per female-clutch (old vs. any new versions) against the duration-eggs relationship of known (lone female) duration-egg measurements?
+
+### run model fits for initL (and initS) and mD and compare in figures and tables (perhaps gam better than glm?)
+
+```{r}
+library(dplyr)
+```
+
+*Assumption 1: Poisson response*
+The number of eggs appears to be appropriately modeled as coming from a poisson distribution by looking at the full pooled dataset, or grouping by levels of the main explanatory variable, the proportion of days before hatch any females was present.
+```{r}
+ggplot(data = clutch_egg_num_data) +
+  geom_histogram(aes(x = med_t5eggs))
+
+clutch_egg_num_data %>%
+  mutate(init_durL_cuts = cut(init_durL, breaks=c(0,4,8,16,24,32,60))) %>%
+ggplot(data=.) +
+  geom_histogram(aes(x = med_t5eggs, fill = init_durL_cuts), binwidth = 10) +
+  facet_wrap(vars(init_durL_cuts))
+
+clutch_egg_num_data %>%
+  mutate(sum_mD_cuts = cut(sum_mD, breaks=c(0,4,8,16,24,32,80))) %>%
+ggplot(data=.) +
+  geom_histogram(aes(x = med_t5eggs, fill = sum_mD_cuts), binwidth = 10) +
+  facet_wrap(vars(sum_mD_cuts))
+```
+
+*Assumption 2: Mean = Var*
+*initL:* There is extreme overdispersion (var = ~7-26 * mean) and there isn't even an monotonic increase in var with increasing mean. This might be an indication that using initiator days guarded to predict number of eggs isn't even approximately appropriate.
+
+*sum_mD:*  There is less extreme overdispersion (var = ~6.8-10.4 * mean) and but there is a nearly monotonic increase in var with increasing mean.
+```{r}
+clutch_egg_num_data %>%
+  mutate(init_durL_cuts = cut(init_durL, breaks=c(0,4,8,16,24,32,60))) %>%
+  group_by(init_durL_cuts) %>%
+  summarise(mean=mean(med_t5eggs),var=var(med_t5eggs),ratio=var/mean,n=n())
+
+clutch_egg_num_data %>%
+  mutate(sum_mD_cuts = cut(sum_mD, breaks=c(0,4,8,16,24,32,80))) %>%
+  group_by(sum_mD_cuts) %>%
+  summarise(mean=mean(med_t5eggs),var=var(med_t5eggs),ratio=var/mean,n=n())
+```
+
+*Assumption 3: Linearity*
+```{r}
+# initL
+ggplot(data = clutch_egg_num_data, aes(x = init_durL, y = log(med_t5eggs))) +
+  geom_point() +
+  geom_smooth()
+
+ggplot(data = clutch_egg_num_data, aes(x = init_durL, y = med_t5eggs)) +
+  geom_point() +
+  geom_smooth()
+
+ggplot(data = clutch_egg_num_data, aes(x = init_durL, y = med_t5eggs, color = sum_vD_initL>0)) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom")
+  
+ggplot(data = clutch_egg_num_data, aes(x = init_durL, y = med_t5eggs, color = initiation_date)) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom") + 
+    scale_colour_gradientn(colours=rainbow(4))
+
+ggplot(data = clutch_egg_num_data, 
+       aes(x = init_durL, y = med_t5eggs, color = interaction(ants_removed, sum_vD_initL>0))) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  semi_join(fec_model_data %>% 
+              left_join(top5eggs_summary) %>% 
+              filter(mom_at_init,
+                     !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1))) %>%
+ggplot(data=., 
+       aes(x = init_durL, y = med_t5eggs, color = ants_removed)) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom")
+
+# sum_mD
+ggplot(data = clutch_egg_num_data, aes(x = sum_mD, y = log(med_t5eggs))) +
+  geom_point() +
+  geom_smooth()
+
+ggplot(data = clutch_egg_num_data, aes(x = sum_mD, y = med_t5eggs)) +
+  geom_point() +
+  geom_smooth()
+
+ggplot(data = clutch_egg_num_data, aes(x = sum_mD, y = med_t5eggs, color = visited)) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom")
+  
+ggplot(data = clutch_egg_num_data, aes(x = sum_mD, y = med_t5eggs, color = initiation_date)) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom") + 
+    scale_colour_gradientn(colours=rainbow(4))
+
+ggplot(data = clutch_egg_num_data, 
+       aes(x = sum_mD, y = med_t5eggs, color = interaction(ants_removed, visited))) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  semi_join(fec_model_data %>% 
+              left_join(top5eggs_summary) %>% 
+              filter(mom_at_init,
+                     !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1))) %>%
+ggplot(data=., 
+       aes(x = sum_mD, y = med_t5eggs, color = ants_removed)) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom")
+```
+
+*Assumption 3: Independence*
+*initL*: This all looks ok as far as the relationships between med_t5eggs, init_durL, sum_vD_initL,ants_removed goes. Same for when you look only at whether clutches were visited or not.
+*sum_mD*: sum_mD and sum_vD are clearly (obviously) collinear. I'm not sure there is a way to include the number or proportion of days that a clutch was occupied by a visitor without introducing this collinearity with sum_mD.
+```{r}
+#install.packages("GGally")
+library("GGally") 
+
+ggpairs(data = select(clutch_egg_num_data, med_t5eggs, init_durL, sum_vD_initL,ants_removed))
+ggpairs(data = select(clutch_egg_num_data %>% mutate(visited_initL=sum_vD_initL>0), 
+                      med_t5eggs, init_durL, visited_initL,ants_removed))
+
+ggpairs(data = select(clutch_egg_num_data, med_t5eggs, sum_mD, sum_vD,ants_removed))
+ggpairs(data = select(clutch_egg_num_data, med_t5eggs, sum_mD, visited,ants_removed))
+
+ggpairs(data = select(clutch_egg_num_data, med_t5eggs, sum_gD, sum_vD,ants_removed))
+```
+
+models
+```{r}
+t5eggs_initL_dur.glm_pois.ai <- 
+  clutch_egg_num_data %>%
+  filter(!is.na(init_durL)) %>%
+  mutate(med_t5eggs=round(med_t5eggs)) %>%
+glm(med_t5eggs ~ init_durL*sum_vD_initL, family = poisson,
+                             data=.)
+summary(t5eggs_initL_dur.glm_pois.ai)
+
+# library(MASS)
+# t5eggs_initL_dur.glm_nb.ai <- 
+#   clutch_egg_num_data %>%
+#   filter(!is.na(init_durL)) %>%
+#   mutate(med_t5eggs=round(med_t5eggs)) %>%
+# glm.nb(med_t5eggs ~ init_durL*sum_vD_initL,
+#                              data=.)
+# summary(t5eggs_initL_dur.glm_nb.ai)
+# detach("package:MASS", unload=TRUE)
+
+# t5eggs_initL_dur.gam.ai <- 
+#   clutch_egg_num_data %>%
+#   filter(!is.na(init_durL)) %>%
+#   mutate(med_t5eggs=round(med_t5eggs)) %>%
+# gam(med_t5eggs ~ s(init_durL, bs="cr")*s(sum_vD_initL, bs="cr"),
+#                              data=.)
+# summary(t5eggs_initL_dur.gam.ai)
+# 
+# gam.check(t5eggs_initL_dur.gam.ai)
+# plot(t5eggs_initL_dur.gam.ai, residuals=T, pages = 1)
+# 
+# 
+# 
+# t5eggs_mD.gam <- 
+#   clutch_egg_num_data %>%
+#   filter(!is.na(sum_mD)) %>%
+#   mutate(med_t5eggs=round(med_t5eggs)) %>%
+# gam(med_t5eggs ~ s(sum_mD, bs="cr"), data=.)
+# summary(t5eggs_mD.gam)
+# 
+# gam.check(t5eggs_mD_dur.gam)
+# plot(t5eggs_mD.gam, residuals=T, pages = 1)
+# 
+# t5eggs_mD.lm <- 
+#   clutch_egg_num_data %>%
+#   filter(!is.na(sum_mD)) %>%
+#   mutate(med_t5eggs=round(med_t5eggs)) %>%
+# lm(med_t5eggs ~ sum_mD, data=.)
+# summary(t5eggs_mD.lm)
+# plot(t5eggs_mD.lm)
+# visreg(t5eggs_mD.lm)
+# 
+# 
+# gam.check(t5eggs_mD_dur.gam)
+# plot(t5eggs_mD.gam, residuals=T, pages = 1)
+# 
+# t5eggs_gdur_loneFs.lm <- gam(med_t5eggs ~ guard_duration,
+#                              data = t5eggs_gdur_loneFs.data)
+# summary(t5eggs_gdur_loneFs.lm)
+# visreg(t5eggs_gdur_loneFs.lm, "guard_duration", gg=TRUE)
+# 
+# t5eggs_gdur_loneFs.glm_pois <- glm(med_t5eggs ~ guard_duration, family = poisson,
+#                              data = t5eggs_gdur_loneFs.data)
+# summary(t5eggs_gdur_loneFs.glm_pois)
+# visreg(t5eggs_gdur_loneFs.glm_pois, "guard_duration", gg=TRUE)
+# 
+# t5eggs_gdur_loneFs.gam_pois <- gam(med_t5eggs ~ s(guard_duration, bs="cr"), family = poisson,
+#                              data = t5eggs_gdur_loneFs.data)
+# summary(t5eggs_gdur_loneFs.gam_pois)
+# plot(t5eggs_gdur_loneFs.gam_pois)
+# visreg(t5eggs_gdur_loneFs.gam_pois, "guard_duration", gg=TRUE)
+```
+      
+      
+
+Many females that started the season by laying in existing clutches went on to initiate their own clutches later in the season (Figure S3).
+```{r}
+
+```
+
+
+# 3 - Dataset C: estimating fecundity
+
+eye-balling a square root function model for the decreasing rate of oviposition over time
+- this doesn't make any sense!!!! there doesn't appear to be any real evidence that oviposition occurs along this pattern, it only arises from looking at the effect of guarding duration on the total number of eggs in the clutch
+```{r}
+sqrt.fun <- function(x) sqrt(x*180+400)
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(size = 4, alpha = 0.50) +
+  geom_smooth(method=loess) +
+  stat_function(fun=sqrt.fun) +
+  theme(legend.position = "bottom")
+
+sqrt(0*180+400)
+sqrt(4*180+400)
+sqrt(20*180+400)
+sqrt(40*180+400)
+
+sqrt(20*180+400)+sqrt(8*180+400)
+
+
+clutch_egg_num_data %>%
+  mutate(init_durL_cuts = cut(init_durL, breaks=c(0,4,8,12,16,20,24,28,32,60)),
+         sum_vD_initL_cuts = cut(sum_vD_initL, breaks=c(-4,0,4,8,12,20,28,60))) %>%
+  group_by(init_durL_cuts,sum_vD_initL_cuts) %>%
+  summarize(mean = mean(med_t5eggs), 
+            sqrt_est = mean(sqrt(init_durL*180+400) + sqrt(sum_vD_initL*180+400)-20),
+            n=n())
+
+clutch_egg_num_data %>%
+  mutate(sqrt_est = sqrt(init_durL*180+400) + sqrt(sum_vD_initL*180+400)-20) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=sqrt_est, color=sum_vD_initL>0)) +
+  geom_point() +
+  geom_abline(slope=1) +
+  ylim(0,200) + xlim(0,200)
+
+clutch_egg_num_data %>%
+  mutate(sqrt_est = (sqrt(init_durL*180+400) + sqrt(sum_vD_initL*180+400)-20)-10) %>%
+  ggplot(data=., aes(y=med_t5eggs, x=sqrt_est, color=sum_vD_initL>0)) +
+  geom_point() +
+  geom_abline(slope=1) +
+  ylim(0,200) + xlim(0,200)
+
+ggplot(data = clutch_egg_num_data, 
+       aes(x = sum_mD, y = med_t5eggs, color = interaction(ants_removed, visited))) +
+  geom_point() +
+  geom_smooth(se=F) +
+  theme(legend.position = "bottom")
+```
+
+### using this sqrt heuristic to estimate fecundity, then compare results to the old way
+```{r}
+visited_1st_4d_data_tb %>%
+  left_join(clutch_egg_num_data) %>%
+  mutate(eggs_sqrt_est_v1 = ifelse(mom_at_init,
+                                   sqrt(guard_duration*180+400),
+                                   ifelse(!mom_at_init,
+                                          sqrt(sum_vD*180+400)-20,
+                                          NA)),
+         eggs_sqrt_est_v2 = ifelse(initL,
+                                   sqrt(guard_duration*180+400),
+                                   ifelse(!initL,
+                                          sqrt(sum_vD_initL*180+400)-20,
+                                          NA))) %>%
+  group_by(location) %>%
+    mutate(eggs_sqrt_est_clutch_allF_v1 = sum(eggs_sqrt_est_v1),
+           eggs_sqrt_est_clutch_allF_v2 = sum(eggs_sqrt_est_v2)) %>%
+  ungroup() %>%
+  group_by(Female_ID) %>%
+    mutate(eggs_sqrt_est_life_v1 = sum(eggs_sqrt_est_v1),
+           eggs_sqrt_est_life_v2 = sum(eggs_sqrt_est_v2)) %>%
+  ungroup()
+
+visited_1st_4d_data_tb %>%
+  left_join(clutch_egg_num_data) %>%
+  mutate(eggs_sqrt_est_v1 = ifelse(mom_at_init,
+                                   sqrt(guard_duration*180+400),
+                                   ifelse(!mom_at_init,
+                                          sqrt(sum_vD*180+400)-20,
+                                          NA)),
+         eggs_sqrt_est_v2 = ifelse(initL,
+                                   sqrt(guard_duration*180+400),
+                                   ifelse(!initL,
+                                          sqrt(sum_vD_initL*180+400)-20,
+                                          NA))) %>%
+  group_by(location) %>%
+    mutate(eggs_sqrt_est_clutch_allF_v1 = sum(eggs_sqrt_est_v1),
+           eggs_sqrt_est_clutch_allF_v2 = sum(eggs_sqrt_est_v2)) %>%
+  ungroup() %>%
+  group_by(Female_ID) %>%
+    mutate(eggs_sqrt_est_life_v1 = sum(eggs_sqrt_est_v1),
+           eggs_sqrt_est_life_v2 = sum(eggs_sqrt_est_v2)) %>%
+  ungroup() %>%
+  filter(clutch_initiated_order==1) %>%
+  ggplot(data=., aes(x=guard_duration, y=eggs_sqrt_est_life_v1)) +
+  geom_point() +
+  geom_smooth()
+  
+# can we weight the number of eggs contributed to each clutch using this square root heuristic?
+# so scaling the contribution of each female to 
+```
+
+```{r}
+visited_1st_4d_data_tb %>%
+  filter(!is.na(initiation_date)) %>%
+  count(Female_ID, mom_at_init)
+
+#### old version of estimating fecundity
+# est_fecundity_clutch <- visited_1st_4d_data_tb %>%
+#   mutate(desert_rel2h = visit_ends-est_hatch) %>%
+#   group_by(Female_ID) %>%
+#   mutate(started_by_initiating = 
+#            any(clutch_visited_order==1&clutch_initiated_order==1)) %>%
+#   ungroup() %>%
+#   select(location, Female_ID, clutch_initiated_order, desert_rel2h,
+#          females_removed, ants_removed, 
+#          `visited in 4 days`, started_by_initiating) %>%
+#   left_join(clutch_egg_num_data, by=c("location")) %>%
+#   mutate(est_eggs_clutchS_sc2h = n_eggs*(initMb4h_sc2hS/mDb4h_sc2h),
+#          est_eggs_clutchL_sc2h = n_eggs*(initMb4h_sc2hL/mDb4h_sc2h),
+#          est_eggs_clutchL = ) %>%
+#   group_by(Female_ID) %>%
+#     mutate(est_eggs_lifeL_sc2h = sum(est_eggs_clutchL_sc2h, na.rm = TRUE),
+#            est_eggs_lifeS_sc2h = sum(est_eggs_clutchS_sc2h, na.rm = TRUE),
+#            n_clutches_iv = n(),
+#            n_initiated = sum(!is.na(clutch_initiated_order)),
+#            n_visited = sum(is.na(clutch_initiated_order))) %>%
+#   ungroup()
+# 
+# 
+# est_fecundity_clutch %>% distinct(Female_ID)
+# 
+# est_fecundity_future <- est_fecundity_clutch %>%
+#   filter(clutch_initiated_order == 1) %>%
+#   mutate(est_eggs_futureL = est_eggs_lifeL - est_eggs_clutchL,
+#          est_eggs_futureS = est_eggs_lifeS - est_eggs_clutchS,
+#          desert_catL = ifelse(desert_rel2hL <= -16, "desert", 
+#                              ifelse(desert_rel2hL > -16 & desert_rel2hL <= 4,
+#                                     "eggs","nymphs")),
+#          visited_cat = ifelse(visited_early == "visited", "vis", "not"),
+#          #ants_cat = ifelse(ants_removed, "none", "ants"),
+#          #strat_catL = paste0(desert_catL," ",visited_cat," ",ants_cat),
+#          desert_catS = ifelse(desert_rel2hS <= -16, "desert", 
+#                              ifelse(desert_rel2hS > -16 & desert_rel2hS <= 4, 
+#                                     "eggs","nymphs")))
+#          #strat_catS = paste0(desert_catS," ",visited_cat," ",ants_cat))
+# 
+# est_fecundity_future_all <- est_fecundity_life_all %>%
+#   left_join(est_fecundity_future)
+# 
+# est_fecundity_strat_cats <- est_fecundity_future %>%
+#   select(Female_ID, location, mDb4h_sc2h, 
+#          initMb4h_sc2hL, desert_rel2hL, 
+#          est_eggs_clutchL, est_eggs_lifeL, est_eggs_futureL, desert_catL,
+#          initMb4h_sc2hS, desert_rel2hS, 
+#          est_eggs_clutchS, est_eggs_lifeS, est_eggs_futureS, desert_catS,
+#          females_removed, ants_removed, clutch_initiated_order, 
+#          n_clutches_iv, n_initiated, n_visited)
+```
+
+
+# 4 - Final Figures
+
+plot eggs ~ guarding duration 
+  A) initL (lone)
+  B) initL with visitors
+  C) sum_mD
+
+show actual numbers of eggs counted for representative examples
+  A) lone female, guarded eggs
+  B) lone female, guarded nymphs
+  C) visited female, deserted early
+  D) many visitors
+
+A) initL (lone)
+```{r}
+theme_set(theme_publilia())
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(aes(y=med_t5eggs), method=loess, 
+              color = "black", fill="black") +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+
+## initL only
+# fec_model_data %>%
+#   left_join(top5eggs_summary) %>%
+#   filter(initL,
+#          !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+# ggplot(data=., 
+#        aes(x=guard_duration, y=med_t5eggs)) +
+#   geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.80) +
+#   geom_smooth(aes(y=med_t5eggs), method=loess, 
+#               color = "black", fill="black") +
+#   xlab("Guarding duration of initiating female") +
+#   ylab("Clutch size (number of eggs)") +
+#   theme(legend.position = "bottom")
+
+## Cutt off at actual hatching, not 20 days
+# fec_model_data %>%
+#   left_join(top5eggs_summary) %>%
+#   filter(mom_at_init,
+#          !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+# ggplot(data=., 
+#        aes(x=guard_duration, y=med_t5eggs, 
+#            color=guard_duration>(est_hatch-initiation_date),
+#            fill=guard_duration>(est_hatch-initiation_date))) +
+#   geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.80) +
+#   geom_smooth(aes(y=med_t5eggs), method=lm) +
+#   xlab("Guarding duration of initiating female") +
+#   ylab("Clutch size (number of eggs)") +
+#   scale_color_manual(labels=c("before hatch", "after hatch"),
+#                      values=c("black", "gray")) +
+#   scale_fill_manual(labels=c("before hatch", "after hatch"),
+#                     values=c("black", "gray")) +
+#   theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs, 
+           color=guard_duration>20,
+           fill=guard_duration>20)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(aes(y=med_t5eggs), method=lm) +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  scale_color_manual(labels=c("before hatch", "after hatch"),
+                     values=c("black", "gray")) +
+  scale_fill_manual(labels=c("before hatch", "after hatch"),
+                    values=c("black", "gray")) +
+  theme(legend.position = "bottom")
+
+## initL only
+# fec_model_data %>%
+#   left_join(top5eggs_summary) %>%
+#   filter(initL,
+#          !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+# ggplot(data=., 
+#        aes(x=guard_duration, y=med_t5eggs, 
+#            color=guard_duration>20,
+#            fill=guard_duration>20)) +
+#   geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.80) +
+#   geom_smooth(aes(y=med_t5eggs), method=lm) +
+#   xlab("Guarding duration of initiating female") +
+#   ylab("Clutch size (number of eggs)") +
+#   scale_color_manual(labels=c("before hatch", "after hatch"),
+#                      values=c("black", "gray")) +
+#   scale_fill_manual(labels=c("before hatch", "after hatch"),
+#                     values=c("black", "gray")) +
+#   theme(legend.position = "bottom")
+
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_l_t5eggs)) +
+  geom_point(size = 1, alpha = 0.80) +
+  geom_smooth(method=loess, 
+              color = "black", fill="black") +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+```
+
+B) initL with visitors
+```{r}
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !is.na(!(eggs_ever_visited|num_at_init>1))) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs,
+           color=!(eggs_ever_visited|num_at_init>1),
+           fill=!(eggs_ever_visited|num_at_init>1))) +
+  geom_point(size = 1, alpha = 0.80) +
+  geom_smooth(method=loess) +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+
+# fec_model_data %>%
+#   left_join(top5eggs_summary) %>%
+#   filter(mom_at_init,
+#          !is.na(!(eggs_ever_visited|num_at_init>1))) %>%
+# ggplot(data=., 
+#        aes(x=guard_duration, y=med_t5eggs,
+#            color=interaction(!(eggs_ever_visited|num_at_init>1),
+#                              guard_duration>20),
+#            fill=interaction(!(eggs_ever_visited|num_at_init>1),
+#                             guard_duration>20)))+
+#   geom_point(aes(y=med_t5eggs), size = 4, alpha = 0.80) +
+#   geom_smooth(aes(y=med_t5eggs), method=lm) +
+#   xlab("Guarding duration of initiating female") +
+#   ylab("Clutch size (number of eggs)") +
+#   scale_color_manual(labels=c("before hatch, visited", 
+#                             "after hatch, visited",
+#                             "before hatch, not visited", 
+#                             "after hatch, not visited"),
+#                   values=c("skyblue3","orange3",
+#                            "skyblue1","orange1")) +
+#   scale_fill_manual(labels=c("before hatch, visited", 
+#                             "after hatch, visited",
+#                             "before hatch, not visited", 
+#                             "after hatch, not visited"),
+#                   values=c("skyblue3","orange3",
+#                            "skyblue1","orange1"))
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !is.na(!(eggs_ever_visited|num_at_init>1))) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_l_t5eggs)) +
+  geom_point(size = 1, alpha = 0.80) +
+  geom_smooth(method=loess) +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !is.na(!(eggs_ever_visited|num_at_init>1))) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_l_t5eggs,
+           color=!(eggs_ever_visited|num_at_init>1),
+           fill=!(eggs_ever_visited|num_at_init>1))) +
+  geom_point(size = 1, alpha = 0.80) +
+  geom_smooth(method=loess) +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+```
+
+C) sum_mD
+NOTE: I use clutch_egg_num_data here but fec_model_data above. I should decide on one and stick with that.
+```{r}
+clutch_egg_num_data %>%
+  left_join(top5eggs_summary) %>%
+ggplot(data=., 
+       aes(x=sum_mD, y=med_t5eggs)) +
+  geom_point(size = 1, alpha = 0.50) +
+  geom_smooth(method=loess, color="black", fill="black") +
+  xlab("Sum of guarding durations of initiator and visitors") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+
+clutch_egg_num_data %>%
+  left_join(top5eggs_summary) %>%
+ggplot(data=., 
+       aes(x=sum_mD, y=med_l_t5eggs)) +
+  geom_point(size = 1, alpha = 0.50) +
+  geom_smooth(method=loess, color="black", fill="black") +
+  xlab("Sum of guarding durations of initiator and visitors") +
+  ylab("Clutch size (length of clutch)") +
+  theme(legend.position = "bottom")
+```
+
+
+show actual numbers of eggs counted for representative examples
+
+A) lone female, guarded eggs
+```{r}
+clutch_status_init_hatch_labels_v1 %>%
+  left_join(fec_model_data) %>%
+  group_by(location) %>%
+  filter(any(!(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)),
+         any(mom_at_init&est_rel2h>=-2&est_rel2h<=2),
+         !is.na(egg_num)) %>%
+  ungroup() %>%
+  distinct(location, Date, initiation_date, egg_num) %>%
+  ggplot(aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+
+clutch_status_init_hatch_labels_v1 %>%
+  left_join(fec_model_data) %>%
+  group_by(location) %>%
+  filter(any(!(eggs_ever_visited|num_at_init>1)),
+         any(mom_at_init&est_rel2h>=-2&est_rel2h<=2),
+         !is.na(egg_num)) %>%
+  ungroup() %>%
+  distinct(location, Date, initiation_date, egg_num) %>%
+  ggplot(aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+```
+
+B) lone female, guarded nymphs
+```{r}
+clutch_status_init_hatch_labels_v1 %>%
+  left_join(fec_model_data) %>%
+  group_by(location) %>%
+  filter(any(!(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)),
+         any(mom_at_init&est_rel2h>=10),
+         !is.na(egg_num)) %>%
+  ungroup() %>%
+  distinct(location, Date, initiation_date, egg_num) %>%
+  ggplot(aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+
+```
+
+C) visited female, deserted early
+```{r}
+clutch_status_init_hatch_labels_v1 %>%
+  left_join(select(fec_model_data, -initiation_date, -egg_fate, -egg_fate_date)) %>%
+  group_by(location) %>%
+  filter(any(!(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)),
+         any(mom_at_init&guard_duration>=0&guard_duration<=3), 
+         !is.na(egg_num)) %>%
+  ungroup() %>%
+  distinct(location, Date, initiation_date, egg_num,
+           eggs_ever_visited,num_at_init,n_clutches_on_plant) %>%
+  ggplot(aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+
+```
+
+D) many visitors
+```{r}
+clutch_status_init_hatch_labels_v1 %>%
+  left_join(fec_model_data) %>%
+  group_by(location) %>%
+  filter(any(eggs_ever_visited),
+         any(mom_at_init&guard_duration<=20)) %>%
+  ungroup() %>%
+  distinct(location, Date, initiation_date, egg_num) %>%
+  ggplot(aes(x=Date-initiation_date,y=egg_num)) +
+  geom_point() +
+  geom_smooth(color="purple",se=F) +
+  facet_wrap(vars(location)) +
+  theme(legend.position="bottom")
+```
+
+# Figures for chapter - (all to supplement?)
+
+The final number of eggs in a clutch was highly correlated with the duration that a female guarded them prior to hatching (Figure S2), indicating that Publilia reticulata females continue to lay eggs over time as they guard them. *Figure plus stats*
+```{r}
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(aes(y=med_t5eggs), method=loess, 
+              color = "black", fill="black") +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs, 
+           color=guard_duration>20,
+           fill=guard_duration>20)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(aes(y=med_t5eggs), method=lm) +
+  ylim(0,140) +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  scale_color_manual(labels=c("before hatch", "after hatch"),
+                     values=c("black", "gray")) +
+  scale_fill_manual(labels=c("before hatch", "after hatch"),
+                    values=c("black", "gray")) +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs, 
+           color=guard_duration>20,
+           fill=guard_duration>20)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(span = 1) +
+  ylim(0,140) +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  scale_color_manual(labels=c("before hatch", "after hatch"),
+                     values=c("black", "gray")) +
+  scale_fill_manual(labels=c("before hatch", "after hatch"),
+                    values=c("black", "gray")) +
+  theme(legend.position = "bottom")
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(aes(y=med_t5eggs), method="glm", method.args = list(family="poisson"), 
+              color = "black", fill="black") +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+
+# simple square root model
+fec_model_data.v1 <- fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1))
+
+fec_model_data.v1 %>%
+  glm(data=., med_t5eggs ~ guard_duration, family="poisson")
+
+fec_mod.m1 <- fec_model_data.v1 %>%
+  glm(data=., med_t5eggs ~ guard_duration + I(sqrt(guard_duration)), family="poisson")
+
+fec_model_data.v1.tmp <- fec_model_data.v1 %>%
+  add_column(fit = predict(fec_mod.m1, newdata = ., type = 'response'))
+## grad the inverse link function
+ilink <- family(fec_mod.m1)$linkinv
+## add fit and se.fit on the **link** scale
+fec_model_data.m1_fit_ci <- fec_model_data.v1.tmp %>%
+  add_column(setNames(as_tibble(predict(fec_mod.m1, fec_model_data.v1.tmp, se.fit = TRUE)[1:2]), 
+                      c('fit_link','se_link'))) %>%
+  ## create the interval and backtransform
+  mutate(fit_resp  = ilink(fit_link),
+         conf_upr = ilink(fit_link + (2 * se_link)),
+         conf_lwr = ilink(fit_link - (2 * se_link)))
+
+ggplot(data = fec_model_data.m1_fit_ci, 
+       aes(x = guard_duration, y = fit)) +
+    theme_publilia() +
+    geom_point(aes(y = med_t5eggs), alpha = 0.1, size = 5) + 
+    geom_line(aes(y = fit), size = 1) +
+    geom_ribbon(aes(ymin = conf_upr, ymax = conf_lwr),
+                    alpha = 0.3, color = NA)
+
+# square root model before/after hatch
+fec_model_data.v2 <- fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init, !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+  mutate(before_after_hatch = ifelse(guard_duration>=20, "after hatch", "before hatch"))
+
+fec_model_data.v2 %>%
+  glm(data=., med_t5eggs ~ guard_duration*before_after_hatch, family="poisson")
+
+fec_mod.m2 <- fec_model_data.v2 %>%
+  glm(data=., med_t5eggs ~ I(sqrt(guard_duration))*before_after_hatch, family="poisson")
+
+fec_model_data.v2.tmp <- fec_model_data.v2 %>%
+  add_column(fit = predict(fec_mod.m2, newdata = ., type = 'response'))
+## grad the inverse link function
+ilink <- family(fec_mod.m2)$linkinv
+## add fit and se.fit on the **link** scale
+fec_model_data.m2_fit_ci <- fec_model_data.v2.tmp %>%
+  add_column(setNames(as_tibble(predict(fec_mod.m2, fec_model_data.v2.tmp, se.fit = TRUE)[1:2]), 
+                      c('fit_link','se_link'))) %>%
+  ## create the interval and backtransform
+  mutate(fit_resp  = ilink(fit_link),
+         conf_upr = ilink(fit_link + (2 * se_link)),
+         conf_lwr = ilink(fit_link - (2 * se_link)))
+
+ggplot(data = fec_model_data.m2_fit_ci, 
+       aes(x = guard_duration, y = fit, color=before_after_hatch, fill=before_after_hatch)) +
+    theme_publilia() +
+    geom_point(aes(y = med_t5eggs), alpha = 0.1, size = 5) + 
+    geom_line(aes(y = fit), size = 1) +
+    geom_ribbon(aes(ymin = conf_upr, ymax = conf_lwr),
+                    alpha = 0.3, color = NA)
+
+```
+
+This pattern holds when females were forcibly removed (Figure S2), confirming that females are not depositing a lump sum of eggs at initiation and staying longer with larger clutches as suggested by Olmstead and Wood (198X) for the closely related Entylia carinata (as Entylia bactriana). *Just stats*
+```{r}
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !is.na(!(eggs_ever_visited|num_at_init>1))) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs,
+           color=!(eggs_ever_visited|num_at_init>1),
+           fill=!(eggs_ever_visited|num_at_init>1))) +
+  geom_point(size = 1, alpha = 0.80) +
+  geom_smooth(span=0.75) +
+  xlab("Guarding duration of initiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+```
+
+The sum of all females’ egg-guarding durations was more predictive of final clutch size than egg guarding duration of the initiator alone (Table S1 with alternative models and their AICs), showing that females lay eggs while visiting existing clutches. *Figure plus AIC?*
+```{r}
+clutch_egg_num_data %>%
+  left_join(top5eggs_summary) %>%
+ggplot(data=., 
+       aes(x=sum_mD, y=med_t5eggs)) +
+  geom_point(size = 1, alpha = 0.50) +
+  geom_smooth(span=0.75, color="black", fill="black") +
+  xlab("Sum of guarding durations of initiator and visitors") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = "bottom")
+
+sum_mD_data <- clutch_egg_num_data %>%
+  left_join(top5eggs_summary) %>%
+  select(sum_mD, med_t5eggs)
+```
+
+Combine plots
+```{r}
+fec_fig1A <- fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs, 
+           color=guard_duration>20,
+           fill=guard_duration>20)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(span = 0.75) +
+  xlab("Guarding duration of\ninitiating female") +
+  ylab("Clutch size (number of eggs)") +
+  scale_color_manual(labels=c("before hatch", "after hatch"),
+                     values=c("black", "gray")) +
+  scale_fill_manual(labels=c("before hatch", "after hatch"),
+                    values=c("black", "gray")) +
+  theme(legend.position = c(0.8,0.9)) + ylim(0,191) + xlim(0,76.2)
+
+fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init, females_removed,
+         !(eggs_ever_visited|num_at_init>1|n_clutches_on_plant>1)) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs, 
+           color=guard_duration>20,
+           fill=guard_duration>20)) +
+  geom_point(aes(y=med_t5eggs), size = 1, alpha = 0.80) +
+  geom_smooth(span = 1) +
+  xlab("Guarding duration of\ninitiating female") +
+  ylab("Clutch size (number of eggs)") +
+  scale_color_manual(labels=c("before hatch", "after hatch"),
+                     values=c("black", "gray")) +
+  scale_fill_manual(labels=c("before hatch", "after hatch"),
+                    values=c("black", "gray")) +
+  theme(legend.position = c(0.8,0.8)) + ylim(0,191) + xlim(0,76.2)
+
+fec_fig1B <- fec_model_data %>%
+  left_join(top5eggs_summary) %>%
+  filter(mom_at_init, !is.na(!(eggs_ever_visited|num_at_init>1))) %>%
+ggplot(data=., 
+       aes(x=guard_duration, y=med_t5eggs,
+           color=(eggs_ever_visited|num_at_init>1),
+           fill=(eggs_ever_visited|num_at_init>1))) +
+  geom_point(size = 1, alpha = 0.80) +
+  geom_smooth(span=0.75) +
+  scale_color_brewer(palette="Set2", labels=c("Never visited", "Visited")) +
+  scale_fill_brewer(palette="Set2", labels=c("Never visited", "Visited")) +
+  xlab("Guarding duration of\ninitiating female") +
+  ylab("Clutch size (number of eggs)") +
+  theme(legend.position = c(0.8,0.9)) + ylim(0,191) + xlim(0,76.2)
+
+fec_fig1C <- clutch_egg_num_data %>%
+  left_join(top5eggs_summary) %>%
+ggplot(data=., 
+       aes(x=sum_mD, y=med_t5eggs)) +
+  geom_point(size = 1, alpha = 0.50) +
+  geom_smooth(span=0.75, color="black", fill="black") +
+  xlab("Sum of guarding durations of\ninitiator and visitors") +
+  ylab("Clutch size (number of eggs)") + ylim(0,191) + xlim(0,76.2)
+
+fec_fig1 <- egg::ggarrange(fec_fig1A, fec_fig1B, fec_fig1C, 
+               labels = c("A","B","C"), nrow=1)
+
+ggsave("oviposition_over_time_loess.png", fec_fig1,
+       device="png", width = 300, height = 110, units = "mm", dpi = "print")
+```
+
+# Ovary data
+```{r}
+col_types = c("date", rep("text", 9), rep("numeric", 10), rep("text", 9), "numeric")
+ovary_data <- read_xlsx("../Publilia_2019_ovary_data.xlsx", col_types = col_types, na = c(".","?",""))
+
+# revised IDs
+females_collected_file <- "../data_in_progress/females_collected_2019.xlsx"
+females_collected <- read_xlsx(females_collected_file, sheet = "Tube Labels Ordered",
+                                      col_types = c("date", rep("text", 16)), 
+                                      na = c("", "NA")) %>%
+  mutate(Date = as_date(Date))
+
+ovary_fems_revIDs <- females_collected %>%
+  select(Auto_label = `Label stem`, Revised_ID = `Revised ID`, Revision_Notes = `Revision Notes`) %>%
+  separate(Auto_label, into = c("DormPlant", "FemID_label"), sep = "_") %>%
+  mutate(FemID_label = str_trim(FemID_label, side = "both"),
+         `Female ID` = paste0(DormPlant, " ", FemID_label))
+
+ovary_data_w_counts <- ovary_data %>%
+  rowwise() %>%
+  mutate(n_ovarioles = sum(`O1: ovarioles`, `O2: ovarioles`),
+         n_dev_ovar = sum(`O1: dev`, `O2: dev`),
+         n_dev_ovid = sum(`O1: oviduct`, `O2: oviduct`),
+         n_nr_dev = sum(`O1: near dev`, `O2: near dev`),
+         n_dev_total = sum(n_dev_ovar, n_dev_ovid, `dev detached (ovary origin unknown)`),
+         n_dev_nr_total = sum(n_dev_total, n_nr_dev, `nr dev detached (ovary origin unknown)`),
+         n_ov_reliable = ifelse(`Total ovariole count reliable?` == "y",
+                                       TRUE,
+                                       FALSE)) %>%
+  ungroup() %>%
+  full_join(ovary_fems_revIDs, by = "Female ID") %>% 
+  arrange(`Female ID`) %>% 
+ # filter(is.na(`Tube ID`) | is.na(Revised_ID)) %>%
+  filter(!is.na(`Tube ID`) | !is.na(Revised_ID)) %>%
+  select(Tube_ID = `Tube ID`, Female_ID = Revised_ID,
+       n_ovarioles, n_dev_ovar, n_dev_ovid, n_nr_dev, n_dev_total, n_dev_nr_total,
+       n_ov_reliable,  pronotum_len = `Pronotum L (lateral)`)
+
+ovary_data_long <- ovary_data %>%
+  mutate(n_ov_reliable = ifelse(
+    `Total ovariole count reliable?`=="y",TRUE,FALSE),
+    egg_attr_reliable = ifelse(`Egg attribution to ovarioles reliable?`=="y",TRUE,FALSE)) %>%
+  select(Tube=`Tube ID`, Female_ID=`Female ID`, 
+         O1_ovs=`O1: ovarioles`, O2_ovs=`O2: ovarioles`,
+         O1_dev=`O1: dev`, O2_dev=`O2: dev`, 
+         Uk_dev=`dev detached (ovary origin unknown)`,
+         O1_ovi=`O1: oviduct`, O2_ovi=`O2: oviduct`,
+         O1_nrd=`O1: near dev`, O2_nrd=`O2: near dev`, 
+         Uk_nrd=`nr dev detached (ovary origin unknown)`,
+         n_ov_reliable, egg_attr_reliable,
+         pronotum_len = `Pronotum L (lateral)`) %>%
+  pivot_longer(cols=c(O1_ovs, O2_ovs, 
+                      O1_ovi, O2_ovi, O1_dev, O2_dev, Uk_dev, 
+                      O1_nrd, O2_nrd, Uk_nrd), 
+               names_pattern = "(^..)(....)",
+               names_to=c("site","name")) %>%
+  mutate(dev_stage=substr(name,2,4)) %>% select(-name, n=value) %>%
+  full_join(ovary_fems_revIDs, by = c("Female_ID"="Female ID")) %>%
+  select(Tube, Female_ID=Revised_ID, site, dev_stage, n, n_ov_reliable, egg_attr_reliable, pronotum_len) %>%
+  filter(!is.na(Tube))
+
+```
+
+## Within and among female patterns of ovary structure and egg development
+*Note that I didn't filter by egg_attr_reliable in the following yet*
+- The number of ovarioles per female varied from 13 to 20 (median = 17)
+- Each ovary had as many as 10 and as few as 6 ovarioles (median = 9)
+- The number of ovarioles per ovary tended to be uneven within females (median=1, mode=1, range=0-4); the majority of females had one ovary with at least one more ovariole than the other.
+- Each ovary had as many as 10 developed eggs in the ovarioles and oviduct (median=2), and it was more common to have one or two more developed eggs in one ovary than another than to have same number in each ovary.
+- Females had anywhere from 2 to 16 developed eggs total in their ovaries and oviduct (median=6, mode=6).
+- Each ovary had as many as 6 nearly developed eggs in the ovarioles and these were never found in the oviduct (median 1), and it was more common to have a difference of one than to have even numbers of nearly developed eggs in the two ovaries.
+- So at a given time, an ovary may have anywhere from 0 to 14 developed or nearly developed eggs (median=4, mode=0) and females had a total of anywhere from 4 to 28 developed or nearly developed eggs in their ovaries (median=11, mode=11 and 12).
+```{r}
+ovary_data_long %>%
+  group_by(Female_ID, dev_stage) %>%
+  mutate(bigger=rank(ifelse(site %in% c("O1","O2"),n,NA),ties.method="first"),
+         Ov_renamed=ifelse(bigger<3, as.character(bigger), "Uk")) %>%
+  ungroup()
+
+# The number of ovarioles per female varied from 13 to 20 (median = 17)
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)))$total %>% quantile(na.rm=T)
+
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2))) %>%
+  ggplot(data=., aes(x=total)) +
+  geom_histogram(binwidth=1) + xlab("Total n ovarioles in female")
+
+# Each ovary had as many as 10 and as few as 6 ovarioles (median = 9)
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable))$n %>% quantile(na.rm=T)
+
+# The number of ovarioles per ovary tended to be uneven within females (median=1, mode=1, range=0-4);
+# the majority of females had one ovary with at least one more ovariole than the other.
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  mutate(diff=abs(O1-O2)))$diff %>% quantile(na.rm=T)
+
+ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  mutate(diff=abs(O1-O2)) %>%
+  arrange(desc(diff)) %>%
+  ggplot(data=., aes(x=diff)) +
+  geom_histogram() + xlab("Difference in n ovarioles between ovaries")
+  
+# Each ovary had as many as 10 developed eggs in the ovarioles and oviduct (median=2)
+(ovary_data_long %>%
+  filter(dev_stage=="dev", n_ov_reliable))$n %>% quantile(na.rm=T)
+
+# and it was more common to have one or two more developed eggs in one ovary than another 
+# than to have same number in each ovary.
+ovary_data_long %>%
+  filter(dev_stage=="dev", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  mutate(diff=abs(O1-O2)) %>%
+  arrange(desc(diff)) %>%
+  ggplot(data=., aes(x=diff)) +
+  geom_histogram() + xlab("Difference in n dev eggs between ovaries")
+
+# Females had anywhere from 2 to 16 developed eggs total in their ovaries and oviduct (median=6, mode=6)
+(ovary_data_long %>%
+  filter(dev_stage=="dev", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2))) %>%
+  ggplot(data=., aes(x=total)) +
+  geom_histogram(binwidth=1) + xlab("Total n dev eggs in female")
+
+# Each ovary had as many as 6 nearly developed eggs in the ovarioles and these were never found in the oviduct (median 1), and it was more common to have a difference of one than to have even numbers of nearly developed eggs in the two ovaries.
+(ovary_data_long %>%
+  filter(dev_stage=="nrd", n_ov_reliable))$n %>% quantile(na.rm=T)
+
+ovary_data_long %>%
+  filter(dev_stage=="nrd", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  mutate(diff=abs(O1-O2)) %>%
+  arrange(desc(diff)) %>%
+  ggplot(data=., aes(x=diff)) +
+  geom_histogram() + xlab("Difference in n nearly dev eggs between ovaries")
+
+# So at a given time, an ovary may have anywhere from 0 to 14 developed or nearly developed eggs (median=4, mode=0)
+(ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup())$n_dev_nrd %>% quantile(na.rm=T)
+
+# and females had a total of anywhere from 4 to 28 developed or nearly developed eggs in their ovaries (median=11, mode=11 and 12).
+(ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)))$total %>% quantile(na.rm=T)
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)) %>%
+  ggplot(data=., aes(x=total)) +
+  geom_histogram(binwidth=1) + xlab("Total n dev + nearly dev eggs in female")
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  mutate(diff=abs(O1-O2)) %>%
+  arrange(desc(diff)) %>%
+  ggplot(data=., aes(x=diff)) +
+  geom_histogram() + xlab("Difference in n dev + nearly dev eggs between ovaries")
+```
+
+*Note that some female ID names are repeated, so group_by(Female_ID) leads to inflated counts*
+
+Number of ovarioles did not predict number of developed or developing eggs, which doesn't support the hypothesis that variation in ovariole number leads to variation in egg-laying rates among females.
+```{r}
+ovary_data_long %>%
+  filter(dev_stage %in% c("ovs", "dev"), n_ov_reliable) %>%
+  pivot_wider(names_from=dev_stage, values_from=n) %>%
+  group_by(Female_ID) %>% 
+    summarize(n_dev = sum(dev, na.rm=T),
+              n_ovs = sum(ovs, na.rm=T)) %>% 
+  ungroup() %>%
+  ggplot(data=.,aes(x=n_ovs, y=n_dev)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("ovs", "nrd"), n_ov_reliable) %>%
+  pivot_wider(names_from=dev_stage, values_from=n) %>%
+  group_by(Female_ID) %>% 
+    summarize(n_nrd = sum(nrd, na.rm=T),
+              n_ovs = sum(ovs, na.rm=T)) %>% 
+  ungroup() %>%
+  ggplot(data=.,aes(x=n_ovs, y=n_nrd)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("ovs", "dev", "nrd"), n_ov_reliable) %>%
+  pivot_wider(names_from=dev_stage, values_from=n) %>%
+  group_by(Female_ID) %>% 
+    summarize(n_nrd_dev = sum(nrd, dev, na.rm=T),
+              n_ovs = sum(ovs, na.rm=T)) %>% 
+  ungroup() %>%
+  ggplot(data=.,aes(x=n_ovs, y=n_nrd_dev)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("ovs", "dev", "nrd"), n_ov_reliable) %>%
+  pivot_wider(names_from=dev_stage, values_from=n) %>%
+  group_by(Female_ID) %>% 
+    summarize(n_nrd_dev = sum(nrd, dev, na.rm=T),
+              n_ovs = sum(ovs, na.rm=T)) %>% 
+  ungroup() %>% filter(n_ovs<=20, n_ovs>10) %>% # there are some extreme outliers with >30 ovarioles
+  ggplot(data=.,aes(x=n_ovs, y=n_nrd_dev)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+
+```
+
+Pronotum length did not predict number of ovarioles or number of developed or developing eggs.
+```{r}
+ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable, site!="Uk") %>%
+  group_by(Female_ID) %>% 
+    summarize(n_ovs = sum(n),
+              pronotum_len=first(pronotum_len)) %>% 
+  ungroup() %>%
+  ggplot(data=.,aes(x=pronotum_len, y=n_ovs)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+ovary_data_long %>%
+  filter(dev_stage=="dev", n_ov_reliable, site!="Uk") %>%
+  group_by(Female_ID) %>% 
+    summarize(n_dev = sum(n),
+              pronotum_len=first(pronotum_len)) %>% 
+  ungroup() %>%
+  ggplot(data=.,aes(x=pronotum_len, y=n_dev)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+ovary_data_long %>%
+  filter(dev_stage=="nrd", n_ov_reliable, site!="Uk") %>%
+  group_by(Female_ID) %>% 
+    summarize(n_nrd = sum(n),
+              pronotum_len=first(pronotum_len)) %>% 
+  ungroup() %>%
+  ggplot(data=.,aes(x=pronotum_len, y=n_nrd)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable, site!="Uk") %>%
+  group_by(Female_ID) %>% 
+    summarize(n_dev_nrd = sum(n),
+              pronotum_len=first(pronotum_len)) %>% 
+  ungroup() %>%
+  ggplot(data=.,aes(x=pronotum_len, y=n_dev_nrd)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+```
+
+Is there any difference in number of ovarioles among females that deserted early vs. stayed?
+Or among *early-visited* females that deserted early vs. stayed?
+```{r}
+
+```
+
+Is there any difference in number of ovarioles among females that were collected while visiting vs. guarding their own clutch vs. not yet laying any eggs vs. being on a leaf?
+```{r}
+
+```
+
+Is there any signal of change in number of developed eggs in ovaries over guarding time?
+```{r}
+
+```
+
+
+# Figures for Chapter
+I dissected 133 females collected in the female removal experiment, 77 from the control enclosures and 56 from the ant-exclusion enclosures. There were no significant differences between the metrics of ovary anatomy and development or body size for the two treatments, so the following are the combined figures.
+```{r}
+library(gtsummary)
+
+clutch_durations_summary_v2 %>%
+  distinct(Female_ID, ants_removed) %>%
+  right_join(ovary_data_w_counts, by = c("Female_ID")) %>%
+  filter(!is.na(Tube_ID)) %>% 
+  mutate(Dorm=substr(Female_ID,1,1)) %>%
+  count(Dorm, ants_removed)
+ 
+ovary_data_w_counts %>%
+  filter(!is.na(Tube_ID)) %>% 
+  mutate(Dorm=substr(Female_ID,1,1),
+         ants_removed=ifelse(Dorm %in% c("F","H"), TRUE,
+                             ifelse(Dorm %in% c("D","G"), FALSE, NA))) %>%
+  count(ants_removed)
+  
+ 
+ovary_data_w_counts %>%
+  filter(!is.na(Tube_ID)) %>% 
+  mutate(Dorm=substr(Female_ID,1,1),
+         ants_removed=ifelse(Dorm %in% c("F","H"), TRUE,
+                             ifelse(Dorm %in% c("D","G"), FALSE, NA))) %>%
+  select(ants_removed, n_ov_reliable, n_ovarioles, n_dev_total, n_nr_dev, n_dev_nr_total) %>%
+  tbl_summary(by=ants_removed)
+```
+
+I was able to count the number of developed and developing eggs in each ovariole for 125 females and the total number of eggs in the ovaries in 127 females.
+```{r}
+ovary_data_w_counts %>% filter(!is.na(location),!is.na(Tube_ID)) %>% count(n_ov_reliable)
+ovary_data_w_counts %>% filter(!is.na(location),!is.na(Tube_ID)) %>% count(!is.na(n_dev_nr_total))
+```
+
+There was considerable variation in the number of ovarioles and number of developing or mature eggs among females. The number of ovarioles per ovary ranged from 6 to 10 (median = 9) and the total number of ovarioles per female ranged from from 13 to 20 (median = 17). Asymmetry in the number of ovarioles among the ovaries was common, with more females having a difference of one or more ovarioles between the ovaries (n=73) than having an equal numbers of ovarioles between the ovaries (n=53). 
+```{r}
+# Each ovary had as many as 10 and as few as 6 ovarioles (median = 9)
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable))$n %>% quantile(na.rm=T)
+
+ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  mutate(diff=abs(O1-O2)) %>%
+  arrange(desc(diff)) %>%
+  ggplot(data=., aes(x=diff)) +
+  geom_histogram() + xlab("Difference in n ovarioles between ovaries")
+
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  mutate(diff=abs(O1-O2))) %>% count(diff>0)
+
+# The number of ovarioles per female varied from 13 to 20 (median = 17)
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)))$total %>% quantile(na.rm=T)
+
+(ovary_data_long %>%
+  filter(dev_stage=="ovs", n_ov_reliable) %>%
+  pivot_wider(names_from=site, values_from=n) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2))) %>%
+  ggplot(data=., aes(x=total)) +
+  geom_histogram(binwidth=1) + xlab("Total n ovarioles in female")
+```
+
+There was also considerable variation in the number of developed and developing eggs in the ovarioles and oviducts, both within females and across females. The number of developed eggs within an ovariole ranged from 0 to 6 (median = 3), and the number of developing eggs ranged from 0 to 6 (median = 2). The number of eggs in each of the lateral oviducts ranged from 0 to 8 (median = 1). All eggs in the oviducts were fully developed, and I never observed eggs entirely within the common oviduct without some overlap in the lateral oviducts. The total number of developed eggs per female ranged from 2 to 16 (median = 6) and the total number of developed and developing eggs per female ranged from 4 to 28 (median = 11).
+```{r}
+# The number of developed eggs within an ovariole ranged from 0 to 6 (median = 3),
+(ovary_data_long %>% filter(dev_stage=="dev", n_ov_reliable, site %in% c("O1","02")))$n %>%
+  quantile(na.rm=T)
+  
+# and the number of developing eggs ranged from 0 to 6 (median = 3).
+(ovary_data_long %>% filter(dev_stage=="nrd", n_ov_reliable, site %in% c("O1","02")))$n %>%
+  quantile(na.rm=T)
+
+# The number of developed eggs within an ovariole ranged from 0 to 8 (median = 1),
+(ovary_data_long %>% filter(dev_stage=="ovi", n_ov_reliable, site %in% c("O1","02")))$n %>%
+  quantile(na.rm=T)
+
+# Each ovary had as many as 10 developed eggs in the ovarioles and oviduct (median=2)
+(ovary_data_long %>%
+  filter(dev_stage=="dev", n_ov_reliable))$n %>% quantile(na.rm=T)
+
+(ovary_data_long %>%
+  filter(dev_stage %in% c("dev"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)))$total %>% quantile(na.rm=T)
+
+(ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)))$total %>% quantile(na.rm=T)
+
+
+# So at a given time, an ovary may have anywhere from 0 to 14 developed or nearly developed eggs (median=4, mode=0)
+(ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup())$n_dev_nrd %>% quantile(na.rm=T)
+
+# and females had a total of anywhere from 4 to 28 developed or nearly developed eggs in their ovaries (median=11, mode=11 and 12).
+(ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)))$total %>% quantile(na.rm=T)
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  rowwise() %>%
+  mutate(total=sum(O1,O2)) %>%
+  ggplot(data=., aes(x=total)) +
+  geom_histogram(binwidth=1) + xlab("Total n dev + nearly dev eggs in female")
+
+ovary_data_long %>%
+  filter(dev_stage %in% c("dev","nrd"), n_ov_reliable) %>%
+  group_by(Female_ID, site) %>% 
+    summarize(n_dev_nrd = sum(n)) %>% 
+  ungroup() %>%
+  pivot_wider(names_from=site, values_from=n_dev_nrd) %>%
+  mutate(diff=abs(O1-O2)) %>%
+  arrange(desc(diff)) %>%
+  ggplot(data=., aes(x=diff)) +
+  geom_histogram() + xlab("Difference in n dev + nearly dev eggs between ovaries")
+```
+
+We did not observe a correlation between the number of ovarioles and the total number of developed eggs (Pearson's correlation p-value = 0.9708), but there was a correlation between ovariole count and developing egg count (Pearson's correlation coeficient = 0.252, p-value = 0.004812) eggs. Body size (using pronotum size as a proxy) was also not correlated with the number of ovarioles (p-value = 0.239), the number of developed (p-value = 0.07216) or developing (p-value = 0.3897) eggs in a female. So while the number of ovarioles appears to limit the number of developing eggs present in the ovaries, we don't find strong evidence that this translates to fully developed eggs, and natural variation in body size and ovariole count appear unlikely to cause heterogenety in oviposition rates among females.
+```{r}
+ovary_data_good_ovs <- ovary_data_w_counts %>%
+  filter(n_ov_reliable) 
+
+ovary_data_good_ovs %>%
+  ggplot(data=., aes(x=n_ovarioles, y=n_dev_total)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+cor.test(ovary_data_good_ovs$n_ovarioles, ovary_data_good_ovs$n_dev_total, 
+         method="pearson")
+
+ovary_data_good_ovs %>%
+  ggplot(data=., aes(x=n_ovarioles, y=n_nr_dev)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+cor.test(ovary_data_good_ovs$n_ovarioles, ovary_data_good_ovs$n_nr_dev, 
+         method="pearson")
+
+ovary_data_good_ovs %>%
+  ggplot(data=., aes(x=n_ovarioles, y=n_dev_nr_total)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+cor.test(ovary_data_good_ovs$n_ovarioles, ovary_data_good_ovs$n_dev_nr_total, 
+         method="pearson")
+
+ovary_data_good_ovs %>%
+  ggplot(data=., aes(x=pronotum_len, y=n_ovarioles)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+cor.test(ovary_data_good_ovs$pronotum_len, ovary_data_good_ovs$n_ovarioles, 
+         method="pearson")
+
+ovary_data_good_ovs %>%
+  ggplot(data=., aes(x=pronotum_len, y=n_dev_total)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+cor.test(ovary_data_good_ovs$pronotum_len, ovary_data_good_ovs$n_dev_total, 
+         method="pearson")
+
+ovary_data_good_ovs %>%
+  ggplot(data=., aes(x=pronotum_len, y=n_nr_dev)) +
+  geom_count(alpha=0.75) + geom_smooth(method=lm, color="black",fill="black")
+
+cor.test(ovary_data_good_ovs$pronotum_len, ovary_data_good_ovs$n_nr_dev, 
+         method="pearson")
+```
+
+The total number of fully developed eggs in the ovaries differed among females that in different locations (Kruskall-Wallis test: n = 118, H = 10.6, df = 3, p-value = 0.0143). Females on leaves without eggs had significantly more fully developed eggs in their ovaries (median = 18, Holm-adjusted Dunn's test p-value > 0.05) than females on the stem, guarding a clutch that they initiated or visiting an existing clutch, all of which had equivalent numbers of developed eggs (median = 8, Holm-adjusted Dunn's test p-value > 0.05). The number of undeveloped eggs did not differ among females in different locations (p-value > 0.05).
+```{r}
+ovary_data_location <- ovary_data_good_ovs %>%
+  mutate(Dorm = substr(Tube_ID,1,1),
+         date_mom_removed = as_date(ifelse(Dorm %in% c("G", "H"),
+                                    as_date("2019-06-07"),
+                                    ifelse(Dorm %in% c("F", "D"),
+                                           as_date("2019-06-15"),
+                                           NA)))) %>%
+  left_join(select(All_data_v6, Date:Eggs) %>% filter(!is.na(Female_ID)), 
+            by=c("date_mom_removed"="Date", "Female_ID", "Dorm")) %>%
+  filter(!is.na(Female_ID)) %>%
+  mutate(Fem_loc_at_coll = 
+           ifelse(str_sub(Leaf,start=-1) %in% c("A","S","a"),"Stem",
+                  ifelse(!is.na(as.numeric(str_sub(Leaf,start=-1))), "Leaf",NA)))
+  
+clutch_durations_data_removed <- clutch_durations_summary_v2 %>%
+  mutate(date_mom_removed = as_date(ifelse(Dorm %in% c("G", "H"),
+                                    as_date("2019-06-07"),
+                                    ifelse(Dorm %in% c("F", "D"),
+                                           as_date("2019-06-15"),
+                                           NA)))) %>%
+  filter(date_mom_removed >= visit_starts, date_mom_removed <= visit_ends) %>%
+  select(Female_ID:leaf_visit_order, mom_at_init,
+         clutch_visited_order:date_mom_removed)
+
+ovary_data_clutch <- ovary_data_location %>%
+  left_join(clutch_durations_data_removed) %>%
+  mutate(loc_cat = 
+           ifelse(Fem_loc_at_coll=="Stem", 
+                  "Stem",
+                  ifelse((Fem_loc_at_coll=="Leaf")&is.na(clutch_visited_order),
+                         "Leaf no eggs",
+                         ifelse(!is.na(clutch_visited_order)&!mom_at_init,
+                                "Existing clutch",
+                                # don't know why this isn't working
+                                ifelse(!is.na(clutch_initiated_order),
+                                "Initiated clutch",NA)))))
+
+ovary_data_clutch %>%
+  select(Fem_loc_at_coll, loc_cat) %>%
+  tbl_summary()
+
+ovary_data_clutch %>% filter(!is.na(loc_cat)) %>%
+  ggplot(data=., aes(x=loc_cat, y=n_ovarioles, fill=loc_cat)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=3, width=0.35)
+
+ovary_data_clutch %>% filter(!is.na(loc_cat)) %>%
+  ggplot(data=., aes(x=loc_cat, y=pronotum_len, fill=loc_cat)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=3, width=0.35)
+
+ovary_data_clutch %>% filter(!is.na(loc_cat)) %>%
+  ggplot(data=., aes(x=loc_cat, y=n_dev_total, fill=loc_cat)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=3, width=0.35)
+
+ovary_data_clutch %>% filter(!is.na(loc_cat)) %>%
+  ggplot(data=., aes(x=loc_cat, y=n_nr_dev, fill=loc_cat)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=3, width=0.35)
+
+ovary_data_clutch %>% filter(!is.na(loc_cat)) %>%
+  ggplot(data=., aes(x=loc_cat, y=n_dev_nr_total, fill=loc_cat)) +
+  geom_boxplot() +
+  geom_jitter(pch = 21, size=3, width=0.35)
+
+# Kruskall-Wallis test followed by Dunn test
+KWdata_dev_eggs <- ovary_data_clutch %>% filter(!is.na(loc_cat))
+  # run KW test using rstatix::kruskal_test
+  KWtest <- KWdata_dev_eggs %>% kruskal_test(n_dev_total ~ loc_cat)
+  # get effect size using effectsize::rank_epsilon_squared
+  KWepsilon2 <- rank_epsilon_squared(n_dev_total ~ loc_cat, data=KWdata_dev_eggs)
+  # run Dunn test using rstatix::dunn_test
+  dunn <- KWdata_dev_eggs %>% dunn_test(n_dev_total ~ loc_cat)
+  # get multiple comparison groups letters using multcompView::multcompLetters
+  dunn.vec <- dunn$p.adj.signif
+  names(dunn.vec) <- paste(dunn$group1,dunn$group2,sep="-")
+  multcompLetters <- tibble(x=names(multcompLetters(dunn.vec)$Letters),
+                            label=unname(multcompLetters(dunn.vec)$Letters))
+
+```
+
+There was no difference in body size or ovariole count among females that had deserted their first clutch early, guarded their first clutch for at least 10 days or started by visiting an existing clutch.
+```{r}
+desert_cat_ovary_data <- clutch_durations_summary_v2 %>%
+  right_join(select(ovary_data_clutch, 
+                    Female_ID,Tube_ID:pronotum_len, date_mom_removed), 
+             by="Female_ID") %>%
+  mutate(est_hatch = as_date(ifelse(is.na(hatch_date),
+                                 initiation_date + 20,
+                                 hatch_date)),
+         desert_rel2h = visit_ends-est_hatch) %>%
+  group_by(Female_ID) %>%
+  # clutch visited order == 0 means she visited before initiation, so it shouldn't count
+  mutate(started_by =
+           ifelse(any(clutch_visited_order==1&!is.na(clutch_initiated_order)&clutch_initiated_order==1),
+                  "initiating",
+                  ifelse(any(clutch_visited_order==1&is.na(clutch_initiated_order)|
+                       clutch_visited_order==1&!is.na(clutch_initiated_order)&clutch_initiated_order!=1),
+                         "visiting", "other")),
+         n_clutches_with_eggs_iv = sum(!is.na(clutch_visited_order)&(clutch_visited_order>0), na.rm=T)) %>%
+  ungroup() %>%
+  filter(clutch_visited_order==1) %>%
+  mutate(desert_cat = 
+           ifelse(started_by=="initiating",
+                  ifelse(guard_duration <= 10, "desert",
+                         ifelse(guard_duration > 10 & desert_rel2h <= 4, "eggs",
+                                ifelse(desert_rel2h >= 4,"nymphs", NA))),
+                  ifelse(started_by=="visiting", "visit", NA))) %>%
+  # select(Female_ID, clutch_visited_order, guard_duration,
+  #        desert_cat, visit_ends, date_mom_removed) %>%
+  mutate(interupted = date_mom_removed==visit_ends) %>% 
+  filter(#!is.na(desert_cat), 
+         is.na(desert_cat) | !interupted | (interupted & (desert_cat!="desert")))
+
+desert_cat_ovary_data %>%
+  count(desert_cat, interupted)
+
+desert_cat_ovary_data %>%
+  distinct(Female_ID, n_ovarioles, desert_cat) %>%
+  ggplot(data=., aes(x=desert_cat, y=n_ovarioles)) +
+  geom_boxplot() + geom_jitter(pch = 21, size=3, width=0.35)
+
+desert_cat_ovary_data %>%
+  distinct(Female_ID, pronotum_len, desert_cat) %>%
+  ggplot(data=., aes(x=desert_cat, y=pronotum_len)) +
+  geom_boxplot() + geom_jitter(pch = 21, size=3, width=0.35)
+
+```
+
+There was a negative correlation between the number of days a female had been guarding her own clutch when collected and the number of developing eggs in her ovaries (t = -3.2241, df = 66, p-value = 0.001966). There was no relationship between guarding tenure at collection and the number of fully developed eggs, however. Taken together, this suggests that females invest slightly more in oviposition just before initiation, but continue to invest in new eggs for many days after initiation albeit at slowly decreasing rate. Additional experiments will be required to determine whether the costs of initiating a clutch are higher than laying eggs in an existing clutch, which should effect the optimal care strategy in different contexts. 
+```{r}
+ovary_data_clutch %>%
+  ggplot(data=., aes(x=guard_duration, n_dev_total, color=loc_cat, fill=loc_cat)) +
+  geom_count() + geom_smooth(method="lm")
+
+ovary_data_clutch_init <- ovary_data_clutch %>% filter(loc_cat=="Initiated clutch")
+ovary_data_clutch_exist <- ovary_data_clutch %>% filter(loc_cat=="Existing clutch")
+
+cor.test(ovary_data_clutch_init$guard_duration, ovary_data_clutch_init$n_dev_total, 
+         method="pearson")
+
+ovary_data_clutch %>%
+  ggplot(data=., aes(x=guard_duration, y=n_nr_dev, color=loc_cat, fill=loc_cat)) +
+  geom_count() + geom_smooth(method=lm)
+
+cor.test(ovary_data_clutch_init$guard_duration, ovary_data_clutch_init$n_nr_dev, 
+         method="pearson")
+
+cor.test(ovary_data_clutch_exist$guard_duration, ovary_data_clutch_exist$n_nr_dev, 
+         method="pearson")
+
+ovary_data_clutch %>%
+  mutate(loc_tenure = date_mom_removed - visit_starts) %>%
+  ggplot(data=., aes(x=loc_tenure, n_dev_total, color=loc_cat, fill=loc_cat)) +
+  geom_count() + geom_smooth()
+
+ovary_data_clutch %>%
+  mutate(loc_tenure = date_mom_removed - visit_starts) %>%
+  ggplot(data=., aes(x=loc_tenure, n_nr_dev, color=loc_cat, fill=loc_cat)) +
+  geom_count() + geom_smooth(se=F)
+
+```
