@@ -1993,26 +1993,10 @@ ant_data <- ant_counts %>%
 
 # 10 - Estimate clutch size more robust to outliers: median top 5 egg counts
 
-## 10.1 - Generate data for fecundity modeling
-
-```{r}
-fec_model_data <- visited_1st_4d_data_tb %>%
-  filter(!is.na(guard_duration)) %>%
-  group_by(location) %>%
-  mutate(eggs_ever_visited = any(!mom_at_init & visit_ends <= est_hatch)) %>%
-  ungroup() %>%
-  select(Female_ID, location, guard_duration, est_rel2h, initiation_date, est_hatch,
-         mom_at_init, clutch_initiated_order, initL, initS,
-         visit_starts, visit_ends, last_day_fID,
-         num_at_init, n_clutches_on_plant, `visited in 4 days`, eggs_ever_visited, ants,
-         females_removed, ants_removed, 
-         max_egg_num, egg_fate, egg_fate_date)
-```
-
-## 10.2 - Calculate median of top 5 egg counts in lieu of max egg counts
+## 10.1 - Calculate median of top 5 egg counts in lieu of max egg counts
 Taking the median (or mean) of the top 5 egg_num counts yields an estimate of max egg num that is more robust to outliers/miscounts
 ```{r, warning=FALSE}
-tmp_t5eggs_data <- clutch_status_init_hatch_labels_v1 %>%
+t5eggs_data <- clutch_status_init_hatch_labels_v1 %>%
   mutate(est_hatch = as_date(ifelse(is.na(hatch_date),
                                  initiation_date + 20,
                                  hatch_date)),
@@ -2035,7 +2019,7 @@ tmp_t5eggs_data <- clutch_status_init_hatch_labels_v1 %>%
            max_l_eggs = max(ifelse(top5egg_lens,egg_len,NA), na.rm=T)) %>%
   ungroup()
 
-top5eggs_summary <- tmp_t5eggs_data %>%
+top5eggs_summary <- t5eggs_data %>%
   group_by(location) %>%
     summarize(med_t5eggs = first(med_t5eggs),
               mean_t5eggs = first(mean_t5eggs),
@@ -2046,6 +2030,22 @@ top5eggs_summary <- tmp_t5eggs_data %>%
   ungroup()
 ```
 
+## 10.2 - Generate data for fecundity modeling
+
+```{r}
+fec_model_data <- visited_1st_4d_data_tb %>%
+  filter(!is.na(guard_duration)) %>%
+  group_by(location) %>%
+  mutate(eggs_ever_visited = any(!mom_at_init & visit_ends <= est_hatch)) %>%
+  ungroup() %>%
+  select(Female_ID, location, guard_duration, est_rel2h, initiation_date, est_hatch,
+         mom_at_init, clutch_initiated_order, initL, initS,
+         visit_starts, visit_ends, last_day_fID,
+         num_at_init, n_clutches_on_plant, `visited in 4 days`, eggs_ever_visited, ants,
+         females_removed, ants_removed, 
+         max_egg_num, egg_fate, egg_fate_date) %>%
+  left_join(top5eggs_summary)
+```
 
 # 11 - Calculate alternative measures of maternal tenure
 
@@ -2282,9 +2282,19 @@ surv_reg_data <- clutch_survivorship_data %>%
 ```
 
 
-
 ## `Publilia-03-survivorship.Rmd`
 ```{r}
 write_rds(surv_reg_data, here("saved_rds/surv_reg_data.rds"))
 ```
+
+# 13 - Write data for `Publilia-04-within_clutch_iteroparity.Rmd` to `.rds`
+
+## `Publilia-04-within_clutch_iteroparity.Rmd`
+```{r}
+write_rds(clutch_egg_num_data, here("saved_rds/clutch_egg_num_data"))
+write_rds(t5eggs_data, here("saved_rds/t5eggs_data"))
+write_rds(fec_model_data, here("saved_rds/fec_model_data.rds"))
+write_rds(clutch_status_init_hatch_labels_v1, here("saved_rds/clutch_status_init_hatch_labels_v1.rds"))
+```
+
 
