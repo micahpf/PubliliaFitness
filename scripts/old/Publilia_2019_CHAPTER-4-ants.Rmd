@@ -418,7 +418,7 @@ table(mutate(ants_before_after_p3.data, ants=ants_L>0)$ants,
   ylab("Proportion of clutches") +
   xlab("Days since hatch"))
 ```
-FUUUUUUUUCKKKKK!!!!!!!!!!!!
+
 Removing a mother results in a decrease in the probability of the clutch being attended by ants in the four days following removal ().
 ```{r}
 ants_before_after_p1.data <- ants_days_data %>% # ants removed, females removed

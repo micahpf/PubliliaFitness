@@ -1,5 +1,5 @@
 ---
-title: '01 - TreehopperFitness: Quality control'
+title: '01 - TreehopperFitness - Quality control and data prep'
 author: "Micah Fletcher"
 date: '`r Sys.Date()`'
 output: 
@@ -1374,7 +1374,7 @@ clutch_status_guarding_summary_v2 <- clutch_durations_summary_v2 %>%
 Nymphs migrate away from their natal leaf. On plants with multiple clutches, it was sometimes possible to determine the origin of nymphs later in the season because sometimes groups of nymph don't travel very far from their natal leaf and mix with other groups. I manually curated examples of this, so that clutch-level stats on hatching success and nymph survivorship could be determined on the plants with multiple clutches. Some clutches (as a rule only on multi-clutch plants) did not have a clear record of nymphs that emigrated from the natal leaf and thus could not be included in future clutch-level analyses of survivorship.
 
 ## 7.1 - Adding second gen adult counts per leaf to clutch status stats
-```{r}
+```{r, warning=FALSE}
 # counting adults
 eA_status_v1 <- All_data_v6 %>%
   group_by(row_number()) %>% # sum of newly exclosed adults
@@ -1402,7 +1402,7 @@ All_data_v6_clutch_status_stats_v2 <- All_data_v6 %>%
 
 ## 7.2 - Manually check nymph origins for revision
 First create a table of all entried from clutches that were not flagged in the field as having ambiguous origin (e.g. "leaf 6 or 9") in cases were more than one clutch was on the plant. These were revised manually to specify a leaf of origin for the nymphs, where possible.
-```{r}
+```{r, warning=FALSE}
 NOr_status_resolveable_all_unambig_clutches <- All_data_v6_clutch_status_stats_v2 %>% 
   select(Date, Dorm, Plant, Leaf, location, 
          egg_num, N1, N2, N5, n_A, nymph_origin, initiation_date, hatch_date,
@@ -1466,7 +1466,7 @@ NOr_manual_revisions %>%
 ```
 
 ## 7.3 - Implement revisions by creating the new variables NOr_revised and NOr_rev_loc
-```{r}
+```{r, warning=FALSE}
 # if nymph origin was clearly resolveable, the revisions were made in NOr_manual_revisions
 # updating NOr_status with revisions so that it can be left_joined to other data and
 # counts of nymphs and adults on NOr can be calculated
@@ -1552,7 +1552,7 @@ clutch_status_stats_v1_unambig_clutches_hatch_success <- clutch_status_stats_v1 
 
 ## 7.4 - Flag and resolve ambiguous nymph origins
 
-```{r}
+```{r, warning=FALSE}
 NOr_status_resolveable_all_unambig_clutches <- All_data_v6_clutch_status_stats_v2 %>% 
   select(Date, Dorm, Plant, Leaf, location, 
          egg_num, N1, N2, N5, n_A, nymph_origin, initiation_date, hatch_date,
@@ -1663,7 +1663,7 @@ All_data_v6_N_NOr_counts_unambig_clutches_summary_v2 <- All_data_v6_N_NOr_counts
 Calculate hatch success (strict sense; max N1 / max eggs) and nymph survivorship (max N5+A / max eggs AND/OR max N5+A / max N1)
 
 - Filtered out clutches with outlier numbers of N1 or N5 etc at early or late clutch ages, which were assumed to be cases of immigration that weren't caught during manual nymph origin filtering
-```{r}
+```{r, warning=FALSE}
 # Filter to only include curated list of clutches with unambiguous nymph counts after accounting for immigration to non-natal leaves and then sum all nymphs (including emigrants) for each clutch
 # I also added clutch_age variables to help identify clutches that were started too close to the end of sampling to be useful
 clutch_unambig_NOr_revised_ENAa_summary_v2 <- All_data_v6_clutch_status_stats_v2 %>%
@@ -2011,7 +2011,7 @@ fec_model_data <- visited_1st_4d_data_tb %>%
 
 ## 10.2 - Calculate median of top 5 egg counts in lieu of max egg counts
 Taking the median (or mean) of the top 5 egg_num counts yields an estimate of max egg num that is more robust to outliers/miscounts
-```{r}
+```{r, warning=FALSE}
 tmp_t5eggs_data <- clutch_status_init_hatch_labels_v1 %>%
   mutate(est_hatch = as_date(ifelse(is.na(hatch_date),
                                  initiation_date + 20,

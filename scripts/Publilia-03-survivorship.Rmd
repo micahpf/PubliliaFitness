@@ -1,8 +1,11 @@
 ---
-title: "Publilia-03-survivorship.Rmd"
-author: "micah fletcher"
-date: "8/4/2023"
-output: html_document
+title: '03 - PubliliaFitness - Modeling offspring surivorship'
+author: "Micah Fletcher"
+date: '`r Sys.Date()`'
+output: 
+  rmdformats::robobook:
+  fig_width: 9
+toc_depth: 3
 ---
 
 # Required libraries and functions

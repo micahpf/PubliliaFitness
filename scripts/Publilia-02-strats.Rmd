@@ -1,5 +1,5 @@
 ---
-title: '01 - TreehopperFitness: Defining strategies and calculating frequencies'
+title: '02 - PubliliaFitness - Defining strategies and calculating frequencies'
 author: "Micah Fletcher"
 date: '`r Sys.Date()`'
 output: 
@@ -44,6 +44,8 @@ library(gtsummary)
 theme_gtsummary_compact()
 library(flextable)
 library(multcompView)
+library(scales)
+library(ggupset)
 library(here)
 
 theme_publilia <- function(){
@@ -72,12 +74,9 @@ theme_publilia <- function(){
 
 # 0 - Data import
 
-clutch_status_guarding_summary_v2
+All_data_v6 and strats_data should be all we need
 ```{r}
 All_data_v6 <- read_rds(here("saved_rds/All_data_v6.rds"))
-# clutch_status_guarding_summary_v2 <- read_rds(here("saved_rds/clutch_status_guarding_summary_v2.rds"))
-# last_day_fID <- read_rds(here("saved_rds/last_day_fID.rds"))
-
 strats_data <- read_rds(here("saved_rds/strats_data.rds"))
 ```
 
@@ -204,228 +203,6 @@ I also need to know how to pick just one initiator when two (or more) females ar
 #   ungroup()
 ```
 
-# 3 - Defining exposure to ants
-
-## 3.1 - Ant counts on plant; some ants_removed clutches were visited by ants, and vice versa
-```{r}
-## Moved to Publilia-01-qc.Rmd
-# ant_counts <- All_data_v6 %>%
-#   left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
-#   filter(!is.na(initiation_date)) %>%
-#   distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
-#   group_by(location) %>%
-#     mutate(b4h=Date>=initiation_date&Date<est_hatch,
-#            afh=Date>=est_hatch) %>%
-#     summarize(ants_removed=first(ants_removed),
-#               females_removed=first(females_removed),
-#               n_antsP=sum(ants_P,na.rm=T),
-#               ever_antsP=n_antsP>0,
-#               mean_antsP=mean(ants_P,na.rm=T),
-#               med_antsP=median(ants_P,na.rm=T),
-#               
-#               n_antsP_b4h=sum(ants_P&b4h),
-#               ever_antsP_b4h=n_antsP_b4h>0,
-#               mean_antsP_b4h=mean(ifelse(b4h,ants_P,NA),na.rm=T),
-#               med_antsP_b4h=median(ifelse(b4h,ants_P,NA),na.rm=T),
-#               
-#               n_antsP_afh=sum(ants_P&afh),
-#               ever_antsP_afh=n_antsP_afh>0,
-#               mean_antsP_afh=mean(ifelse(afh,ants_P,NA),na.rm=T),
-#               med_antsP_afh=median(ifelse(afh,ants_P,NA),na.rm=T)) %>%
-#   ungroup() %>%
-#   mutate(Dorm=substr(location,1,1),
-#          ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
-
-ggplot(data=ant_counts,aes(x=Dorm,y=n_antsP, fill=ants_treatment)) +
-  geom_boxplot()
-
-ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP, fill=ants_treatment)) +
-  geom_boxplot()
-
-ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_b4h, fill=ants_treatment)) +
-  geom_boxplot()
-
-ggplot(data=ant_counts,aes(x=Dorm,y=mean_antsP_afh, fill=ants_treatment)) +
-  geom_boxplot()
-
-ant_counts %>%
-  count(Dorm,ants_treatment,ever_antsP)
-
-ant_counts %>%
-  count(Dorm,ants_treatment,ever_antsP_b4h)
-
-ant_counts %>%
-  count(Dorm,ants_treatment,ever_antsP_afh)
-
-# how many clutches ever had ants in each of the dorms?
-ant_counts %>%
-  ggplot(data=., aes(y=as.numeric(ever_antsP), x=Dorm, fill=ants_treatment)) +
-  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
-  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
-  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
-  theme_publilia()
-
-ant_counts %>%
-  ggplot(data=., aes(y=as.numeric(ever_antsP_b4h), x=Dorm, fill=ants_treatment)) +
-  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
-  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
-  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
-  theme_publilia()
-
-ant_counts %>%
-  ggplot(data=., aes(y=as.numeric(ever_antsP_afh), x=Dorm, fill=ants_treatment)) +
-  stat_summary(fun="mean", geom = "bar", position = position_dodge(0.9)) +
-  stat_summary(fun.data="mean_se", geom = "errorbar",position = position_dodge(0.9), width = 0.2) +
-  stat_summary(fun.data="n", geom = "text", position = position_dodge(0.9)) +
-  theme_publilia()
-
-# how extreme was the break-through?
-ant_counts %>%
-  ggplot(data=., aes(x=mean_antsP_b4h, color=ants_treatment, linetype=females_removed, group=Dorm)) +
-  geom_freqpoly(bins=100)
-
-ant_counts %>%
-  ggplot(data=., aes(x=med_antsP_b4h, color=ants_treatment, linetype=females_removed, group=Dorm)) +
-  geom_freqpoly()
-
-ant_counts %>%
-  ggplot(data=., aes(x=mean_antsP_afh, color=ants_treatment, linetype=females_removed, group=Dorm)) +
-  geom_freqpoly(bins=100)
-
-ant_counts %>%
-  ggplot(data=., aes(x=med_antsP_afh, color=ants_treatment, linetype=females_removed, group=Dorm)) +
-  geom_freqpoly()
-
-# how many clutches actually ever had ants vs. not?
-ant_counts %>%
-  ggplot(data=., aes(x=ever_antsP_b4h, fill=ants_treatment)) +
-  geom_bar() +
-  theme_publilia() + facet_wrap(~females_removed)
-
-ant_counts %>%
-  ggplot(data=., aes(x=ever_antsP_afh, fill=ants_treatment)) +
-  geom_bar() +
-  theme_publilia() + facet_wrap(~females_removed)
-
-ant_counts %>%
-  ggplot(data=., aes(x=ever_antsP_b4h|ever_antsP_afh, fill=ants_treatment)) +
-  geom_bar() +
-  theme_publilia() + facet_wrap(~females_removed)
-
-```
-
-## 3.2 - Ant arrival times
-```{r}
-## Moved to Publilia-01-qc.Rmd
-# antP_arrival_afh_data <- All_data_v6 %>%
-#   left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
-#   filter(!is.na(initiation_date)) %>%
-#   distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
-#   group_by(location) %>%
-#     mutate(b4h=Date>=initiation_date&Date<est_hatch,
-#            afh=Date>=est_hatch,
-#            is_antsP_afh=ants_P&afh) %>%
-#     filter(is_antsP_afh) %>%
-#     slice_head(n=1) %>% 
-#   mutate(antP_arrival_afh=Date-est_hatch) %>%
-#   select(location, antP_arrival_afh, ants_removed, females_removed,
-#          initiation_date, est_hatch) %>%
-#   ungroup() %>%
-#   mutate(Dorm=substr(location,1,1),
-#          ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
-# 
-# antP_last_b4h_data <- All_data_v6 %>%
-#   left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
-#   filter(!is.na(initiation_date)) %>%
-#   distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
-#   group_by(location) %>%
-#     mutate(b4h=Date>=initiation_date&Date<est_hatch,
-#            afh=Date>=est_hatch,
-#            is_antsP_bfh=ants_P&b4h) %>%
-#     filter(is_antsP_bfh) %>%
-#     slice_tail(n=1) %>% 
-#   mutate(antP_last_b4h=Date-est_hatch) %>%
-#   select(location, antP_last_b4h, ants_removed, females_removed,
-#          initiation_date, est_hatch) %>%
-#   ungroup() %>%
-#   mutate(Dorm=substr(location,1,1),
-#          ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
-# 
-# antL_arrival_afh_data <- All_data_v6 %>%
-#   left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
-#   filter(!is.na(initiation_date)) %>%
-#   distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
-#   group_by(location) %>%
-#     mutate(b4h=Date>=initiation_date&Date<est_hatch,
-#            afh=Date>=est_hatch,
-#            is_antsL_afh=ants_L&afh) %>%
-#     filter(is_antsL_afh) %>%
-#     slice_head(n=1) %>% 
-#   mutate(antL_arrival_afh=Date-est_hatch) %>%
-#   select(location, antL_arrival_afh, ants_removed, females_removed,
-#          initiation_date, est_hatch) %>%
-#   ungroup() %>%
-#   mutate(Dorm=substr(location,1,1),
-#          ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
-# 
-# antL_last_b4h_data <- All_data_v6 %>%
-#   left_join(select(visited_1st_4d_data, location, initiation_date, est_hatch, ants_removed, females_removed)) %>%
-#   filter(!is.na(initiation_date)) %>%
-#   distinct(Date,location,ants_removed,females_removed,initiation_date,est_hatch,ants_L,ants_P) %>%
-#   group_by(location) %>%
-#     mutate(b4h=Date>=initiation_date&Date<est_hatch,
-#            afh=Date>=est_hatch,
-#            is_antsL_bfh=ants_L&b4h) %>%
-#     filter(is_antsL_bfh) %>%
-#     slice_tail(n=1) %>% 
-#   mutate(antL_last_b4h=Date-est_hatch) %>%
-#   select(location, antL_last_b4h, ants_removed, females_removed,
-#          initiation_date, est_hatch) %>%
-#   ungroup() %>%
-#   mutate(Dorm=substr(location,1,1),
-#          ants_treatment=ifelse(ants_removed,"Ants removed","Control"))
-# 
-# ant_data <- ant_counts %>%
-#   left_join(antP_last_b4h_data) %>%
-#   left_join(antP_arrival_afh_data) %>%
-#   left_join(antL_last_b4h_data) %>%
-#   left_join(antL_arrival_afh_data)
-# 
-# visited_1st_4d_data_ants <- visited_1st_4d_data %>%
-#   left_join(ant_data)
-
-strats_data %>%
-  filter(ever_antsP) %>%
-  ggplot(data=., aes(x=est_rel2h, y=antL_last_b4h, color=females_removed)) +
-  geom_point() +
-  geom_abline(slope=1)
-
-strats_data %>%
-  filter(ever_antsP) %>%
-  ggplot(data=., aes(x=est_rel2h, y=antL_arrival_afh, color=females_removed)) +
-  geom_point() +
-  geom_smooth(method=lm) +
-  geom_abline(slope=1)
-
-strats_data %>%
-  filter(ever_antsP) %>%
-  ggplot(data=., aes(x=est_rel2h>=0, y=antL_last_b4h)) +
-  geom_boxplot()
-
-strats_data %>%
-  filter(ants=="Control") %>%
-  ggplot(data=., aes(x=est_rel2h>=0, y=antL_arrival_afh)) +
-  geom_boxplot() +
-  geom_jitter(pch = 21, size=1, width=0.35, height=0) +
-  stat_summary(fun=mean, geom="point", shape=4, size=3)
-
-strats_data %>%
-  filter(ants=="Control", !females_removed) %>%
-  ggplot(data=., aes(x=est_rel2h>=0, y=antL_arrival_afh)) +
-  geom_boxplot() +
-  geom_jitter(pch = 21, size=1, width=0.35, height=0) +
-  stat_summary(fun=mean, geom="point", shape=4, size=3)
-```
 
 # 4 - Figure 1: Histograms of guarding tenure
 
@@ -520,11 +297,11 @@ ggplot(data = filter(strats_data,
 #### Desertion relative to hatch
 Using geom_area and density
 ```{r}
-Fig1_v1_data <- visited_1st_4d_data %>%
+Fig1_v1_data <- strats_data %>%
   filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
          clutch_initiated_order == 1, visit_ends < last_day_fID)
 
-strat_data_table1 <- visited_1st_4d_data %>%
+strat_data_table1 <- strats_data %>%
   mutate(`Ant exclusion` = ifelse(ants_removed, "Ants excluded", "Control"),
          `Females not removed (A)` = !females_removed,
          `Leaf hosted a clutch (B)` = !is.na(initiation_date),
@@ -537,7 +314,7 @@ strat_data_table1 <- visited_1st_4d_data %>%
 #   as_flex_table() %>%
 #   flextable::save_as_docx(path=here("prelim_figs/strat_data_table1.docx"))
 
-strat_data_table2 <- visited_1st_4d_data %>%
+strat_data_table2 <- strats_data %>%
   filter(!is.na(initiation_date), !females_removed) %>%
   mutate(`Ant exclusion` = ifelse(ants_removed, "Ants excluded", "Control"),
          `Mother at initiation (A)` = !is.na(clutch_initiated_order),
@@ -623,7 +400,7 @@ Fig1_v1B.gd <- ggplot(data = filter(Fig1_v1_data, `visited in 4 days` == "Visite
   geom_vline(xintercept = 20, linetype="dashed", 
                 color = "gray", size=1)
 
-Fig1_v1C.gd <- ggplot(data = filter(visited_1st_4d_data,
+Fig1_v1C.gd <- ggplot(data = filter(strats_data,
                                  !females_removed, !mom_at_init,
                                  visit_ends >= initiation_date,
                                  visit_ends < last_day_fID)) +
@@ -951,7 +728,7 @@ filter(visit_cuts_data, initS, vis_cat == "Day 0")
 strats_data %>% filter(initL, mom_at_init, num_at_init>1)
 strats_data %>% filter(initS, mom_at_init, num_at_init>1)
 
-filter(clutch_status_guarding_summary_v2, location == "A18_8", mom_at_init) %>%
+filter(strats_data, location == "A18_8", mom_at_init) %>%
   select(Female_ID:hatch_date, first_visitor_initiator, init_dur_rank:init_first_dur_shortest)
 ```
 
@@ -1286,7 +1063,7 @@ strats_cuts_v4.tukey <- strats_cuts_v4.tukey %>% add_xy_position(x = "vis_cat")
 ### Non-parametric stats: v1
 ```{r}
 # non-parametric: Kruskall-Wallis test followed by Dunn test or pairwise wilcox tests
-vis_cat_v1.data <- visited_1st_4d_data %>%
+vis_cat_v1.data <- strats_data %>%
   left_join(first_visit_cuts) %>%
   mutate(vis_cat = ifelse(num_at_init > 1,
                           "0",
@@ -1347,7 +1124,7 @@ strats_cuts_v1.multcompLetters <- tibble(vis_cat=names(multcompLetters(strats_cu
 Three clutches were omitted from the analysis. Two were visited after hatching, and one had no females present at initiation.
 ```{r}
 # non-parametric: Kruskall-Wallis test followed by Dunn test or pairwise wilcox tests
-vis_cat_v2.data <- visited_1st_4d_data %>%
+vis_cat_v2.data <- strats_data %>%
   left_join(first_visit_cuts) %>%
   mutate(vis_cat = ifelse(num_at_init > 1,
                           "0",
@@ -1362,11 +1139,11 @@ vis_cat_v2.data <- visited_1st_4d_data %>%
 
 # # where do the NAs come from?
 # vis_cat_v2.data %>% filter(is.na(vis_cat))
-# visited_1st_4d_data %>% filter(location=='C41_6')
+# strats_data %>% filter(location=='C41_6')
 # # C41_6 was deserted immediately, then visited long after hatch
-# visited_1st_4d_data %>% filter(location=='E148_6')
+# strats_data %>% filter(location=='E148_6')
 # # E148_6 was also visited long after hatch
-# visited_1st_4d_data %>% filter(location=='E40_9')
+# strats_data %>% filter(location=='E40_9')
 # # There was one female (E_Gkgg: E40_9) on the eggs before and after but not ON the init date.
 # # I suspect I missed her in the field or she may have left and come back. She was never visited
 # # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
@@ -1417,8 +1194,7 @@ strats_cuts_v2.multcompLetters <- tibble(vis_cat=names(multcompLetters(strats_cu
 
 # 6 Comparing early desertion by initiator vs. latest desertion of leaf by any female vs. latest desertion of the plant by any female
 ```{r}
-visit_data.desL.desP <- visited_1st_4d_data %>%
-  left_join(first_visit_cuts) %>%
+visit_data.desL.desP <- strats_data %>%
   group_by(location) %>% mutate(last_visit_ends_L = max(visit_ends, na.rm=T)) %>% ungroup() %>%
   separate(location, into = c("DormPlant", "Leaf"), sep="_", remove=FALSE) %>%
   group_by(DormPlant) %>% mutate(last_visit_ends_P = max(visit_ends, na.rm=T)) %>% ungroup() %>%
@@ -1993,11 +1769,11 @@ ggplot(data =
 
 ## Original from chapter:
 ```{r, fig.width=3, fig.height=3}
-Fig1_v1_data <- visited_1st_4d_data %>%
+Fig1_v1_data <- strats_data %>%
   filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
          clutch_initiated_order == 1, visit_ends < last_day_fID)
 
-strat_data_table1 <- visited_1st_4d_data %>%
+strat_data_table1 <- strats_data %>%
   mutate(`Ant exclusion` = ifelse(ants_removed, "Ants excluded", "Control"),
          `Females not removed (A)` = !females_removed,
          `Leaf hosted a clutch (B)` = !is.na(initiation_date),
@@ -2080,7 +1856,7 @@ hatch_text <- base_text %>%
          "Hatch date", 
          ""))
 
-visited_1st_4d_data %>%
+strats_data %>%
   filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
          clutch_initiated_order == 1, visit_ends < last_day_fID) %>% 
   filter(!is.na(`visited in 4 days`)) %>%
@@ -2144,7 +1920,7 @@ hatch_text <- base_text %>%
          "Hatch date", 
          ""))
 
-(guarding_durations_plot_2023 <- visited_1st_4d_data %>%
+(guarding_durations_plot_2023 <- strats_data %>%
   filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
          clutch_initiated_order == 1, visit_ends < last_day_fID) %>% 
   filter(!is.na(`visited in 4 days`)) %>%
@@ -2192,57 +1968,8 @@ Fig1_v1D +
 
 # 2023.07.22 - Upset plot to clarify sample sizes
 
-## The data used for the figures
-```{r}
-## Unfiltered data
-strats_data <- left_join(clutch_status_guarding_summary_v2, last_day_fID)
-
-## Data for histogram
-visited_1st_4d_data <- strats_data %>%
-  group_by(location) %>%
-    mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
-  ungroup() %>%
-  mutate(`visited in 4 days` = ifelse(visited_1st_4d | num_at_init>1,
-                                      "Visited", "Not visited"),
-         ants = ifelse(ants_removed, "Ants removed", "Control"),
-         est_hatch = as_date(ifelse(is.na(hatch_date),
-                                 initiation_date + 20,
-                                 hatch_date)),
-         est_rel2h = visit_ends-est_hatch)
-
-visited_1st_4d_data %>%
-  filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
-         clutch_initiated_order == 1, visit_ends < last_day_fID) %>% 
-  filter(!is.na(`visited in 4 days`)) %>%
-  mutate(`visited in 4 days` = 
-           ifelse(`visited in 4 days` == "Visited", 
-                  "Visited\nwithin first 4 days", 
-                  "Not visited\nwithin first 4 days"))
-
-## Data for visit vs init
-vis_cat_v1.data <- visited_1st_4d_data %>%
-  left_join(first_visit_cuts) %>%
-  mutate(vis_cat = ifelse(num_at_init > 1,
-                          "0",
-                          ifelse(is.na(first_visit_starts),
-                                 "never visited",
-                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
-         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
-                                              "5+","never visited"))) %>%
-  filter(!females_removed, mom_at_init, 
-         clutch_initiated_order == 1, 
-         !grepl("U", Female_ID),
-         visit_ends < last_day_fID,
-         # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
-         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
-         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
-         !is.na(vis_cat))
-```
-
 ## Upset plot
 ```{r, fig.width=6, fig.height=2}
-library(ggupset)
-
 sample_size_upset_data <- strats_data %>%
   group_by(location) %>%
     mutate(visited_1st_4d = any(!mom_at_init & as.numeric(visit_starts-initiation_date)<=4)) %>%
@@ -2292,7 +2019,7 @@ sample_size_upset_data <- strats_data %>%
          `ants excluded`, `female removed`,
          `female present at intiation`, 
          `first clutch she initiated`,
-         `first clutch she initiated or visited`,
+         `her first clutch`,
          `female marked`, `female disappeared`, `unknown whether visited`, 
          `Figure 3 (dur histograms)`, 
          `Figure 4 (dur vs 1st visit)`,
