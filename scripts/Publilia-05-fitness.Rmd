@@ -19,6 +19,7 @@ source(here("R/Publilia-05-fitness-functions.R"))
 
 ```{r}
 surv_reg_data <- read_rds(here("saved_rds/surv_reg_data.rds"))
+surv_model_fits <- read_rds(here("saved_rds/surv_model_fits.rds"))
 ```
 
 
@@ -59,11 +60,11 @@ est_fitness_prep <- visited_1st_4d_data %>%
 
 # v6: (survivorship ~ ant_treatment * I(desL^2)) * proportion of time on eggs
 est_fitness_hatch_fit_v6 <- 
-  ci_for_fitness(data_in=est_fitness_prep, model=des_hatch.desL.ant_treatment.quad.fits$mai.qb) %>%
+  ci_for_fitness(data_in=est_fitness_prep, model=surv_model_fits$hatch$mai.qb) %>%
   mutate(est_hatch_fit_v6 = fit) %>%
   select(-(fit:conf_lwr))
 est_fitness_Esurv_fit_v6 <- 
-  ci_for_fitness(data_in=est_fitness_hatch_fit_v6, model=des_Esurv.desL.ant_treatment.quad.fits$mai.qb) %>%
+  ci_for_fitness(data_in=est_fitness_hatch_fit_v6, model=surv_model_fits$Esurv$mai.qb) %>%
   mutate(est_Esurv_fit_v6 = fit) %>%
   select(-(fit:conf_lwr))
 
@@ -735,202 +736,6 @@ egg::ggarrange(est_fitness_life_strats_splitvio_eggs_v6_itero.p +
           ncol=1, nrow=3)
 ```
 
-## Comparing to Zink 2003 method
-
-### 3 Zink 2003 model:
-Lifetime fitness (number of eggs that hatched):
-w(t_i) = sum(from i=1, to i=N, P_i*g(t_i))
-P = number of eggs invested in a clutch (all the eggs go to the initiator?)
-t_i = guarding duration in clutch i
-N = lifetime number of clutches
-g(t) = relationship between guarding duration and hatching success
- (assume g(t) equivalent across all clutches 1 to N)
- 
-* I think the main reason Zink found equivalent fitness is that he attributed all the eggs in a clutch to each primary female. Thus an early deserter is given all the eggs from a clutch, even if she leaves within a few days and another female arrives and lays additional eggs. The final nail in the coffin will be to do the exact same "zink" estimates but this time only attributing the egg to each female proportional to the time she spent on the clutch relative to other females.
-```{r}
-surv_reg_data_zink <- focalMb4h_sc2h %>%
-  filter(!is.na(initiation_date), !is.na(guard_duration), !ants_removed) %>%
-  filter(mom_at_init) %>% # primary females
-  group_by(location) %>%
-    summarize(max_primary_dur = max(guard_duration, na.rm=T),
-              females_removed = first(females_removed),
-              initiation_date = first(initiation_date)) %>%
-  ungroup() %>%
-  left_join(top5eggs_summary) %>%
-  select(location, max_primary_dur,
-         females_removed, initiation_date, med_t5eggs) %>%
-  left_join(select(clutch_unambig_NOr_revised_ENAa_summary_imfilt_success_summary_v2,
-                   -c(ants_removed, females_removed, initiation_date, n_eggs)),
-            by=c("location"="NOr_rev_loc")) %>%
-  select(location, initiation_date, hatch_date, 
-         max_primary_dur, med_t5eggs, n_hatched, n_survived,
-         females_removed)
-
-ggplot(data=surv_reg_data_zink, 
-       aes(x=max_primary_dur, y=n_hatched/med_t5eggs)) +
-  geom_point() +
-  geom_smooth(method=lm)
-
-ggplot(data=filter(surv_reg_data_zink, initiation_date<=as_date("2019-06-10")), 
-       aes(x=max_primary_dur, y=n_hatched/med_t5eggs)) +
-  geom_point() +
-  geom_smooth(method=lm)
-
-ggplot(data=filter(surv_reg_data_zink, initiation_date<=as_date("2019-06-10"), !females_removed), 
-       aes(x=max_primary_dur, y=n_hatched/med_t5eggs)) +
-  geom_point() +
-  geom_smooth(method=lm)
-
-zink_hatch.m <- surv_reg_data_zink %>%
-  filter(initiation_date<=as_date("2019-06-10"), !is.na(n_hatched/med_t5eggs)) %>%
-lm(n_hatched/med_t5eggs ~ max_primary_dur, data=.)
-
-summary(zink_hatch.m) # use this for predicting hatching success
-
-zink_hatch.m.norem <- surv_reg_data_zink %>%
-  filter(initiation_date<=as_date("2019-06-10"), !is.na(n_hatched/med_t5eggs), !females_removed) %>%
-lm(n_hatched/med_t5eggs ~ max_primary_dur, data=.)
-
-summary(zink_hatch.m.norem)
-
-est_fitness_clutch_zink <- focalMb4h_sc2h %>%
-  filter(!is.na(initiation_date), !ants_removed) %>%
-  group_by(location) %>%
-    mutate(max_primary_dur = max(mom_at_init*guard_duration, na.rm=T)) %>% # non-primary females are not counted
-  ungroup() %>%
-  left_join(top5eggs_summary) %>%
-  left_join(clutch_momDays_b4h) %>%
-  select(Female_ID, location, guard_duration, max_primary_dur, desert_rel2h=est_rel2h, focalMb4h_sc2h, mDb4h_sc2h,
-         females_removed, initiation_date, med_t5eggs, 
-         mom_at_init, clutch_visited_order, clutch_initiated_order) %>%
-  left_join(select(clutch_unambig_NOr_revised_ENAa_summary_imfilt_success_summary_v2,
-                   -c(ants_removed, females_removed, initiation_date, n_eggs)),
-            by=c("location"="NOr_rev_loc")) %>%
-  select(Female_ID, location, initiation_date, hatch_date, 
-         guard_duration, max_primary_dur, desert_rel2h, focalMb4h_sc2h, mDb4h_sc2h,
-         med_t5eggs, n_hatched, n_survived, females_removed,
-         mom_at_init, clutch_visited_order, clutch_initiated_order) %>%
-  mutate(propD_b4h = focalMb4h_sc2h/mDb4h_sc2h,
-         est_eggs_clutch = med_t5eggs*propD_b4h,
-         zink_est_hatch_clutch_v1 = med_t5eggs*(coef(zink_hatch.m)[[1]]+guard_duration*coef(zink_hatch.m)[[2]]),
-         zink_est_hatch_clutch_v2 = est_eggs_clutch*(coef(zink_hatch.m)[[1]]+guard_duration*coef(zink_hatch.m)[[2]])) %>%
-  group_by(Female_ID) %>%
-    mutate(zink_est_hatch_life_v1 = sum(zink_est_hatch_clutch_v1, na.rm=T),
-           zink_est_hatch_life_v2 = sum(zink_est_hatch_clutch_v2, na.rm=T)) %>%
-  ungroup()
-
-est_fitness_life_strats_Zink <- est_fitness_clutch_zink %>%
-  group_by(Female_ID) %>%
-  # clutch visited order == 0 means she visited before initiation, so it shouldn't count
-  mutate(started_by =
-           ifelse(any(clutch_visited_order==1&!is.na(clutch_initiated_order)&clutch_initiated_order==1),
-                  "initiating",
-                  ifelse(any(clutch_visited_order==1&is.na(clutch_initiated_order)|
-                             clutch_visited_order==1&!is.na(clutch_initiated_order)&clutch_initiated_order!=1),
-                         "visiting", "other")),
-         n_clutches_with_eggs_iv = sum(!is.na(clutch_visited_order)&(clutch_visited_order>0), na.rm=T)) %>%
-  ungroup() %>%
-  filter(clutch_visited_order==1) %>%
-  # mutate(desert_cat = ifelse(started_by=="initiating",
-  #                                ifelse(desert_rel2h <= -16, "desert",
-  #                                       ifelse(desert_rel2h > -16 & desert_rel2h <= 4, "eggs", 
-  #                                              ifelse(desert_rel2h >= 4,"nymphs",
-  #                                                     NA))),
-  #                                ifelse(started_by=="visiting", "visit", 
-  #                                       NA)),
-  mutate(desert_cat = ifelse(started_by=="initiating",
-                                 ifelse(guard_duration <= 10, "desert",
-                                        ifelse(guard_duration > 10 & desert_rel2h <= 4, "eggs", 
-                                               ifelse(guard_duration >= 4,"nymphs",
-                                                      NA))),
-                                 ifelse(started_by=="visiting", "visit", 
-                                        NA)),
-         zink_dur_cat = ifelse(started_by=="initiating",
-                               ifelse(guard_duration<12, "desert",
-                                      ifelse(guard_duration>=12, "stay", NA)),
-                               ifelse(started_by=="visiting", "visit", 
-                                        NA))) %>%
-  distinct(Female_ID, females_removed,
-           guard_duration, max_primary_dur,
-           started_by, desert_cat, zink_dur_cat,
-           zink_est_hatch_clutch_v1, zink_est_hatch_clutch_v2,
-           zink_est_hatch_life_v1, zink_est_hatch_life_v2,
-           n_clutches_with_eggs_iv)
-
-# v1: Zink 2003 attributes all egg in a clutch to the primary female, even if they desert early and a visitor laid additional eggs
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=zink_dur_cat, y=zink_est_hatch_life_v1, fill=zink_dur_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  ggtitle("v1: all eggs in clutch to primary female")
-
-# v2: all calculations the same, but give eggs to females in proportion to the time they spent at clutch relative to other females
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=zink_dur_cat, y=zink_est_hatch_life_v2, fill=zink_dur_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  ggtitle("v2: eggs to female by proportion of time guarding")
-
-# same but separating females that laid one vs. multiple clutches
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=zink_dur_cat, y=zink_est_hatch_life_v1, fill=zink_dur_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  facet_wrap(vars(n_clutches_with_eggs_iv!=1)) +
-  ggtitle("v1: all eggs in clutch to primary female")
-
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=zink_dur_cat, y=zink_est_hatch_life_v2, fill=zink_dur_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  facet_wrap(vars(n_clutches_with_eggs_iv!=1)) +
-  ggtitle("v2: eggs to female by proportion of time guarding")
-
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=desert_cat, y=zink_est_hatch_life_v1, fill=desert_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  ggtitle("v1: all eggs in clutch to primary female")
-
-# same but using desert_cat instead of Zink 2003 cats
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=desert_cat, y=zink_est_hatch_life_v1, fill=desert_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  facet_wrap(vars(n_clutches_with_eggs_iv!=1)) +
-  ggtitle("v1: all eggs in clutch to primary female")
-
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=desert_cat, y=zink_est_hatch_life_v2, fill=desert_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  ggtitle("v2: eggs to female by proportion of time guarding")
-
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  ggplot(data=., aes(x=desert_cat, y=zink_est_hatch_life_v2, fill=desert_cat)) +
-  geom_boxplot(size=1.5) +
-  geom_jitter(pch = 21, size=3, width=0.35) +
-  stat_summary(fun=mean, geom="point", shape=4, size=6) +
-  facet_wrap(vars(n_clutches_with_eggs_iv!=1)) +
-  ggtitle("v2: eggs to female by proportion of time guarding")
-
-```
-
 # Other measures of fecundity
 
 ### Number of clutches laid
@@ -976,6 +781,12 @@ est_fitness_life_strats_Zink %>%
 
 
 ## First clutch vs. future fecundity and fitness
+
+```{r}
+letterSize <- 3
+```
+
+
 Fecundity
 ```{r}
 fitness_life_strats_data <- est_fitness_life_strats %>%
@@ -996,8 +807,7 @@ fitness_first_stats_eggs_v6["multcompLetters"]$multcompLetters <-
 
 fitness_first_stats_eggs_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_clutch, group=desert_cat, 
-                    itero=F, multcompLetters=fitness_first_stats_eggs_v6$multcompLetters,
-                    letterSize=letterSize, ymax=160) +
+                    itero=F, multcompLetters=fitness_first_stats_eggs_v6$multcompLetters,ymax=160) +
   ylab("First-clutch fecundity\n(eggs laid)") + 
     theme(legend.position="none",
           axis.title.x = element_blank(),axis.text.x=element_blank())
@@ -1013,7 +823,7 @@ fitness_future_stats_eggs_v6["multcompLetters"]$multcompLetters <-
 fitness_future_stats_eggs_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_future, group=desert_cat, 
                     itero=F, multcompLetters=fitness_future_stats_eggs_v6$multcompLetters,
-                    letterSize=letterSize, ymax=160) +
+                    ymax=160) +
   ylab("Future fecundity\n(eggs laid)") + 
     theme(legend.position="none",
           axis.title.x = element_blank(),axis.text.x=element_blank())
@@ -1031,7 +841,7 @@ fitness_future_stats_eggs.itero["multcompLetters"]$multcompLetters <-
 fitness_future_stats_eggs_v6.itero.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data.itero, y=est_eggs_future, group=desert_cat, 
                     itero=T, multcompLetters=fitness_future_stats_eggs.itero$multcompLetters,
-                    letterSize=letterSize, ymax=160)$itero +
+                    ymax=160)$itero +
   ylab("Multi-clutch future\nfecundity (eggs laid)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1046,7 +856,7 @@ fitness_life_stats_eggs_v6["multcompLetters"]$multcompLetters <-
 fitness_life_stats_eggs_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat, 
                     itero=F, multcompLetters=fitness_life_stats_eggs_v6$multcompLetters,
-                    letterSize=letterSize, ymax=160) +
+                    ymax=160) +
   ylab("Lifetime fecundity\n(eggs laid)") + 
     theme(legend.position="none")
 
@@ -1113,7 +923,7 @@ fitness_future_stats_eggs.itero["multcompLetters"]$multcompLetters <-
 fitness_future_stats_eggs_v6.itero.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data.itero, y=est_eggs_future, group=desert_cat, 
                     itero=T, multcompLetters=fitness_future_stats_eggs.itero$multcompLetters,
-                    letterSize=letterSize, ymax=160)$itero +
+                    ymax=160)$itero +
   ylab("Multi-clutch future\nfecundity (eggs laid)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1129,7 +939,7 @@ fitness_future_stats_hatched.itero["multcompLetters"]$multcompLetters <-
 fitness_future_stats_hatched_v6.itero.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data.itero, y=est_hatched_future_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_future_stats_hatched.itero$multcompLetters,
-                    letterSize=letterSize, ymax=75)$itero +
+                    ymax=75)$itero +
   ylab("Multi-clutch future\nfitness (eggs hatch)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1145,7 +955,7 @@ fitness_future_stats_survived.itero["multcompLetters"]$multcompLetters <-
 fitness_future_stats_survived_v6.itero.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data.itero, y=est_survived_future_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_future_stats_survived.itero$multcompLetters,
-                    letterSize=letterSize, ymax=22)$itero +
+                    ymax=22)$itero +
   ylab("Multi-clutch future\nfitness (nymphs survive)") + 
     theme(legend.position=c(0.8,0.8))
 
@@ -1174,7 +984,7 @@ fitness_future_stats_eggs.itero.DEN["multcompLetters"]$multcompLetters <-
 fitness_future_stats_eggs_v6.itero.DEN.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data.itero.DEN, y=est_eggs_future, group=desert_cat, 
                     itero=T, multcompLetters=fitness_future_stats_eggs.itero.DEN$multcompLetters,
-                    letterSize=letterSize, ymax=160)$itero +
+                    ymax=160)$itero +
   ylab("Multi-clutch future\nfecundity (eggs laid)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1190,7 +1000,7 @@ fitness_future_stats_hatched.itero.DEN["multcompLetters"]$multcompLetters <-
 fitness_future_stats_hatched_v6.itero.DEN.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data.itero.DEN, y=est_hatched_future_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_future_stats_hatched.itero.DEN$multcompLetters,
-                    letterSize=letterSize, ymax=75)$itero +
+                    ymax=75)$itero +
   ylab("Multi-clutch future\nfitness (eggs hatch)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1206,7 +1016,7 @@ fitness_future_stats_survived.itero.DEN["multcompLetters"]$multcompLetters <-
 fitness_future_stats_survived_v6.itero.DEN.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data.itero.DEN, y=est_survived_future_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_future_stats_survived.itero.DEN$multcompLetters,
-                    letterSize=letterSize, ymax=22)$itero +
+                    ymax=22)$itero +
   ylab("Multi-clutch future\nfitness (nymphs survive)") + 
     theme(legend.position=c(0.8,0.8))
 
@@ -1231,7 +1041,7 @@ fitness_future_stats_hatched["multcompLetters"]$multcompLetters <-
 fitness_future_stats_hatched_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_hatched_future_v6, group=desert_cat, 
                     multcompLetters=fitness_future_stats_hatched$multcompLetters,
-                    letterSize=letterSize, ymax=75) +
+                    ymax=75) +
   ylab("Future\nfitness (eggs hatch)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1247,7 +1057,7 @@ fitness_future_stats_survived["multcompLetters"]$multcompLetters <-
 fitness_future_stats_survived_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_survived_future_v6, group=desert_cat, 
                     multcompLetters=fitness_future_stats_survived$multcompLetters,
-                    letterSize=letterSize, ymax=22) +
+                    ymax=22) +
   ylab("Future\nfitness (nymphs survive)") + 
     theme(legend.position=c(0.8,0.8))
 
@@ -1323,7 +1133,7 @@ fitness_stats_eggs_v6["multcompLetters"]$multcompLetters <-
 fitness_stats_eggs_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_eggs_v6$multcompLetters,
-                    letterSize=letterSize, ymax=160) +
+                    ymax=160) +
   ylab("Lifetime fecundity\n(eggs laid)") + 
     theme(legend.position="none",
           axis.title.x = element_blank(),axis.text.x=element_blank())
@@ -1338,7 +1148,7 @@ fitness_stats_hatched_v6["multcompLetters"]$multcompLetters <-
 fitness_stats_hatched_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_hatched_life_v6, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_hatched_v6$multcompLetters,
-                    letterSize=letterSize, ymax=100) +
+                    ymax=100) +
   ylab("Lifetime fitness\n(eggs hatched)") + 
     theme(legend.position="none",
           axis.title.x = element_blank(),axis.text.x=element_blank())
@@ -1352,7 +1162,7 @@ fitness_stats_survived_v6["multcompLetters"]$multcompLetters <-
 fitness_stats_survived_v6.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_survived_life_v6, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_survived_v6$multcompLetters,
-                    letterSize=letterSize, ymax=30) +
+                    ymax=30) +
   ylab("Lifetime fitness\n(nymphs survived)") + 
   theme(legend.position=c(0.3,0.9))
 
@@ -1360,7 +1170,7 @@ fitness_stats.v6.p.final <-
   egg::ggarrange(fitness_stats_eggs_v6.p, fitness_stats_hatched_v6.p, fitness_stats_survived_v6.p,
                  labels=c("A","B","C"), ncol=1, nrow=3)
 
-ggsave("fitness_stats.violin.final.png",
+ggsave(here("prelim_figs/Publilia-05-fitness/fitness_stats.violin.final.png"),
        fitness_stats.v6.p.final,
        device = "png",
        width = 120, height = 200, units = "mm", dpi = "print")
@@ -1388,7 +1198,7 @@ fitness_stats_eggs_v1["multcompLetters"]$multcompLetters <-
 fitness_stats_eggs_v1.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_eggs_v1$multcompLetters,
-                    letterSize=letterSize, ymax=160) +
+                    ymax=160) +
   ylab("Lifetime fecundity\n(eggs laid)") + 
     theme(legend.position="none",
           axis.title.x = element_blank(),axis.text.x=element_blank())
@@ -1403,7 +1213,7 @@ fitness_stats_hatched_v1["multcompLetters"]$multcompLetters <-
 fitness_stats_hatched_v1.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_hatched_life_v1, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_hatched_v1$multcompLetters,
-                    letterSize=letterSize, ymax=100) +
+                    ymax=100) +
   ylab("Lifetime fitness\n(eggs hatched)") + 
     theme(legend.position="none",
           axis.title.x = element_blank(),axis.text.x=element_blank())
@@ -1417,7 +1227,7 @@ fitness_stats_survived_v1["multcompLetters"]$multcompLetters <-
 fitness_stats_survived_v1.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_survived_life_v1, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_survived_v1$multcompLetters,
-                    letterSize=letterSize, ymax=30) +
+                    ymax=30) +
   ylab("Lifetime fitness\n(nymphs survived)") + 
   theme(legend.position=c(0.3,0.9))
 
@@ -1425,7 +1235,7 @@ fitness_stats.v1.p.final <-
   egg::ggarrange(fitness_stats_eggs_v1.p, fitness_stats_hatched_v1.p, fitness_stats_survived_v1.p,
                  labels=c("A","B","C"), ncol=1, nrow=3)
 
-ggsave("fitness_stats.supp_v1.violin.final.png",
+ggsave(here("prelim_figs/Publilia-05-fitness/fitness_stats.supp_v1.violin.final.png"),
        fitness_stats.v1.p.final,
        device = "png",
        width = 120, height = 200, units = "mm", dpi = "print")
@@ -1450,7 +1260,7 @@ fitness_stats_eggs.semel["multcompLetters"]$multcompLetters <-
 fitness_stats_eggs.semel.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat, 
                     itero=T, multcompLetters=fitness_stats_eggs.semel$multcompLetters,
-                    letterSize=letterSize, ymax=160)$semel +
+                    ymax=160)$semel +
   ylab("Single-clutch female\nfecundity (eggs laid)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1466,7 +1276,7 @@ fitness_stats_eggs.itero["multcompLetters"]$multcompLetters <-
 fitness_stats_eggs.itero.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat, 
                     itero=T, multcompLetters=fitness_stats_eggs.itero$multcompLetters,
-                    letterSize=letterSize, ymax=160)$itero +
+                    ymax=160)$itero +
   ylab("Multi-clutch female\nfecundity (eggs laid)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank()) 
 
@@ -1483,7 +1293,7 @@ fitness_stats_hatched.semel["multcompLetters"]$multcompLetters <-
 fitness_stats_hatched.semel.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_hatched_life_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_stats_hatched.semel$multcompLetters,
-                    letterSize=letterSize, ymax=100)$semel +
+                    ymax=100)$semel +
   ylab("Single-clutch female\nfitness (eggs hatched)") + 
     theme(legend.position=c(0.3,0.8), axis.title.x = element_blank(),axis.text.x=element_blank())
 
@@ -1499,7 +1309,7 @@ fitness_stats_hatched.itero["multcompLetters"]$multcompLetters <-
 fitness_stats_hatched.itero.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_hatched_life_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_stats_hatched.itero$multcompLetters,
-                    letterSize=letterSize, ymax=100)$itero +
+                    ymax=100)$itero +
   ylab("Multi-clutch female\nfitness (eggs hatched)") + 
     theme(legend.position="none", axis.title.x = element_blank(),axis.text.x=element_blank()) 
 
@@ -1516,7 +1326,7 @@ fitness_stats_survived.semel["multcompLetters"]$multcompLetters <-
 fitness_stats_survived.semel.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_survived_life_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_stats_survived.semel$multcompLetters,
-                    letterSize=letterSize, ymax=30)$semel +
+                    ymax=30)$semel +
   ylab("Single-clutch female\nfitness (nymphs survived)") + 
     theme(legend.position="none")
 
@@ -1532,7 +1342,7 @@ fitness_stats_survived.itero["multcompLetters"]$multcompLetters <-
 fitness_stats_survived.itero.p <- 
   fitness_plot_dunn(data=fitness_life_strats_data, y=est_survived_life_v6, group=desert_cat, 
                     itero=T, multcompLetters=fitness_stats_survived.itero$multcompLetters,
-                    letterSize=letterSize, ymax=30)$itero +
+                    ymax=30)$itero +
   ylab("Multi-clutch female\nfitness (nymphs survived)") + 
     theme(legend.position="none") 
 
@@ -1542,197 +1352,11 @@ fitness_stats.parity.p.final <- egg::ggarrange(
   fitness_stats_survived.semel.p, fitness_stats_survived.itero.p,
   labels=c("A","B","C","D","E","F"), ncol=2, nrow=3)
 
-ggsave("fitness_stats.violin.parity.final.png",
+ggsave(here("prelim_figs/Publilia-05-fitness/fitness_stats.violin.parity.final.png"),
        fitness_stats.parity.p.final,
        device = "png",
        width = 200, height = 200, units = "mm", dpi = "print")
 ```
-
-
-## Comparing to Zink 2003 fitness measures
-Lifetime fitness (number of eggs that hatched):
-w(t_i) = sum(from i=1, to i=N, P_i*g(t_i))
-P = number of eggs invested in a clutch (all the eggs go to the initiator?)
-t_i = guarding duration in clutch i
-N = lifetime number of clutches
-g(t) = relationship between guarding duration and hatching success
- (assume g(t) equivalent across all clutches 1 to N)
- 
-* The main reason Zink found equivalent fitness is that he attributed all the eggs in a clutch to each primary female. Thus an early deserter is given all the eggs from a clutch, even if she leaves within a few days and another female arrives and lays additional eggs.
-```{r}
-ggplot(data=filter(surv_reg_data_zink, initiation_date<=as_date("2019-06-10")), 
-       aes(x=max_primary_dur, y=n_hatched/med_t5eggs)) +
-  geom_point() +
-  geom_smooth(method=lm)
-
-zink_hatch.m <- surv_reg_data_zink %>%
-  filter(initiation_date<=as_date("2019-06-10"), !is.na(n_hatched/med_t5eggs)) %>%
-lm(n_hatched/med_t5eggs ~ max_primary_dur, data=.)
-
-summary(zink_hatch.m) # use this for predicting hatching success
-```
-
-```{r}
-zink_fitness_plot_dunn <- function(data, y, group, multcompLetters, letterSize, ymax=160){
-  (p <- eval(substitute(data %>%
-    filter(!females_removed, !is.na(desert_cat)) %>%
-    ggplot(data=., aes(x=group, y=y)) + ylim(-ymax*0.05,ymax) +
-    geom_boxplot(aes(fill=group), 
-                 position = position_dodge(0.75), size = 1.5, key_glyph=draw_key_rect) +
-    stat_summary(aes(fill=group), 
-                 fun=mean, geom="point", shape=4, size=3, color="black", key_glyph=draw_key_rect) +
-    #ylab("Lifetime fecundity\n(eggs laid)")  +
-    xlab("Guarding strategy for first clutch") +
-    theme_publilia() +
-    geom_text(data=multcompLetters, aes(x=x, y=-ymax*0.05, label=label), fontface="bold", size=letterSize))))
-  return(p)
-}
-```
-
-
-```{r}
-# v1: Zink 2003 attributes all egg in a clutch to the primary female, even if they desert early and a visitor laid additional eggs
-zink_fitness_stats_v1 <- 
-  fitness_KW_test(data=est_fitness_life_strats_Zink, y=zink_est_hatch_life_v1, group=zink_dur_cat)
-(Zink_fitness_v1.p <- 
-  zink_fitness_plot_dunn(data=est_fitness_life_strats_Zink, y=zink_est_hatch_life_v1, group=zink_dur_cat, 
-                    multcompLetters=zink_fitness_stats_v1$multcompLetters,
-                    letterSize=4, ymax=150) +
-  ylab("Lifetime fitness: Zink 2003\n(all eggs to primary mother,\nlinear model predicts hatching)") +
-    # geom_jitter(aes(fill=ants_removed), pch = 21, size=3, width=0.35) + 
-    theme(legend.position="none",
-          axis.text.x=element_text(angle=45, vjust=1, hjust=1)))
-
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed, !is.na(desert_cat)) %>%
-  group_by(zink_dur_cat) %>% 
-    summarize(mean_fitness=mean(zink_est_hatch_life_v1),
-              median_fitness=median(zink_est_hatch_life_v1))
-
-# v2: all calculations the same, but give eggs to females in proportion to the time they spent at clutch relative to other females
-zink_fitness_stats_v2 <- 
-  fitness_KW_test(data=est_fitness_life_strats_Zink, y=zink_est_hatch_life_v2, group=zink_dur_cat)
-(Zink_fitness_v2.p <- 
-  zink_fitness_plot_dunn(data=est_fitness_life_strats_Zink, y=zink_est_hatch_life_v2, group=zink_dur_cat, 
-                    multcompLetters=zink_fitness_stats_v2$multcompLetters,
-                    letterSize=4, ymax=150) +
-  ylab("Lifetime fitness: modified from Zink 2003\n(eggs proportional to guarding,\nlinear model predicts hatching)") +
-    # geom_jitter(aes(fill=ants_removed), pch = 21, size=3, width=0.35) + 
-    theme(legend.position="none",
-          axis.text.x=element_text(angle=45, vjust=1, hjust=1)))
-
-(Zink_fitness.p.final <- egg::ggarrange(
-  Zink_fitness_v1.p, Zink_fitness_v2.p, 
-  labels=c("A","B"),
-  ncol=2, nrow=1))
-
-ggsave("Zink_fitness.final.png",
-       Zink_fitness.p.final,
-       device = "png",
-       width = 200, height = 120, units = "mm", dpi = "print")
-
-# same but separating females that laid one vs. multiple clutches
-zink_fitness_data.semel <- est_fitness_life_strats_Zink %>% 
-  filter(n_clutches_with_eggs_iv==1)
-zink_fitness_stats_v1.semel <- 
-  fitness_KW_test(data=zink_fitness_data.semel, y=zink_est_hatch_life_v1, group=zink_dur_cat)
-(Zink_fitness_v1.semel.p <- 
-  zink_fitness_plot_dunn(data=zink_fitness_data.semel, y=zink_est_hatch_life_v1, group=zink_dur_cat, 
-                    multcompLetters=zink_fitness_stats_v1.semel$multcompLetters,
-                    letterSize=4, ymax=150) +
-  ylab("Lifetime fitness: Zink 2003\n(all eggs to primary mother,\nlinear model predicts hatching)") +
-    ggtitle("Single-clutch mothers") +
-    # geom_jitter(aes(fill=ants_removed), pch = 21, size=3, width=0.35) + 
-    theme(legend.position="none",
-          axis.title.x = element_blank(),axis.text.x=element_blank()))
-
-zink_fitness_data.itero <- est_fitness_life_strats_Zink %>% 
-  filter(n_clutches_with_eggs_iv>1)
-zink_fitness_stats_v1.itero <- 
-  fitness_KW_test(data=zink_fitness_data.itero, y=zink_est_hatch_life_v1, group=zink_dur_cat)
-(Zink_fitness_v1.itero.p <- 
-  zink_fitness_plot_dunn(data=zink_fitness_data.itero, y=zink_est_hatch_life_v1, group=zink_dur_cat, 
-                    multcompLetters=zink_fitness_stats_v1.itero$multcompLetters,
-                    letterSize=4, ymax=150) + ggtitle("Multi-clutch mothers") +
-    # geom_jitter(aes(fill=ants_removed), pch = 21, size=3, width=0.35) + 
-    theme(legend.position="none",
-          axis.title.x = element_blank(),axis.text.x=element_blank(),
-          axis.title.y = element_blank(),axis.text.y=element_blank()))
-
-zink_fitness_data.semel <- est_fitness_life_strats_Zink %>% 
-  filter(n_clutches_with_eggs_iv==1)
-zink_fitness_stats_v2.semel <- 
-  fitness_KW_test(data=zink_fitness_data.semel, y=zink_est_hatch_life_v2, group=zink_dur_cat)
-(Zink_fitness_v2.semel.p <- 
-  zink_fitness_plot_dunn(data=zink_fitness_data.semel, y=zink_est_hatch_life_v2, group=zink_dur_cat, 
-                    multcompLetters=zink_fitness_stats_v2.semel$multcompLetters,
-                    letterSize=4, ymax=150) +
-  ylab("Lifetime fitness: modified from Zink 2003\n(all eggs to primary mother,\nlinear model predicts hatching)") +
-    # geom_jitter(aes(fill=ants_removed), pch = 21, size=3, width=0.35) + 
-    theme(legend.position="none",
-          axis.text.x=element_text(angle=45, vjust=1, hjust=1)))
-
-zink_fitness_data.itero <- est_fitness_life_strats_Zink %>% 
-  filter(n_clutches_with_eggs_iv>1)
-zink_fitness_stats_v2.itero <- 
-  fitness_KW_test(data=zink_fitness_data.itero, y=zink_est_hatch_life_v2, group=zink_dur_cat)
-(Zink_fitness_v2.itero.p <- 
-  zink_fitness_plot_dunn(data=zink_fitness_data.itero, y=zink_est_hatch_life_v2, group=zink_dur_cat, 
-                    multcompLetters=zink_fitness_stats_v2.itero$multcompLetters,
-                    letterSize=4, ymax=150) +
-    # geom_jitter(aes(fill=ants_removed), pch = 21, size=3, width=0.35) + 
-    theme(legend.position="none",
-          axis.text.x=element_text(angle=45, vjust=1, hjust=1),
-          axis.title.y = element_blank(),axis.text.y=element_blank()))
-
-(Zink_fitness.parity.p.final <- egg::ggarrange(
-  Zink_fitness_v1.semel.p, Zink_fitness_v1.itero.p,
-  Zink_fitness_v2.semel.p, Zink_fitness_v2.itero.p,
-  labels=c("A","B","C","D"),
-  ncol=2, nrow=2))
-
-ggsave("Zink_fitness.parity.final.png",
-       Zink_fitness.parity.p.final,
-       device = "png",
-       width = 200, height = 200, units = "mm", dpi = "print")
-
-```
-
-why such a small first clutch and larger future clutches for early deserters? early deserters lay more or larger clutches?
-```{r}
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  mutate(parity=ifelse(n_clutches_with_eggs_iv==1,"semel","itero")) %>%
-  count(parity,zink_dur_cat)
-
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  mutate(parity=ifelse(n_clutches_with_eggs_iv==1,"semel","itero")) %>%
-  group_by(zink_dur_cat,parity) %>%
-  summarize(n=n(),
-            mean_n_clutches=mean(n_clutches_with_eggs_iv),
-            mean_max_primary_dur=mean(max_primary_dur)) %>%
-  ungroup()
-
-est_fitness_life_strats_Zink %>%
-  filter(!females_removed) %>%
-  mutate(parity=ifelse(n_clutches_with_eggs_iv==1,"semel","itero")) %>%
-  group_by(desert_cat,parity) %>%
-  summarize(n=n(),
-            mean_n_clutches=mean(n_clutches_with_eggs_iv),
-            mean_max_primary_dur=mean(max_primary_dur)) %>%
-  ungroup()
-
-fitness_life_strats_data %>%
-  filter(!females_removed) %>%
-  mutate(parity=ifelse(n_clutches_with_eggs_iv==1,"semel","itero")) %>%
-  group_by(parity, ants_removed, desert_cat) %>%
-  summarize(n=n(),
-            mean_n_clutches=mean(n_clutches_with_eggs_iv)) %>%
-  ungroup()
-  
-```
-
 
 ## Clutch fitness prediction performance for imputation
 ```{r}
@@ -1757,7 +1381,7 @@ fitness_life_strats_data %>%
   labels=c("A","B"),
   ncol=2, nrow=1))
  
-ggsave("predicted_clutch.final.png",
+ggsave(here("prelim_figs/Publilia-05-fitness/predicted_clutch.final.png"),
        predicted_clutch.p.final,
        device = "png",
        width = 200, height = 100, units = "mm", dpi = "print")
@@ -1831,13 +1455,14 @@ Should I include this in the supplment?
   labels=c("A","B","C","D"),
   ncol=2, nrow=2))
  
-ggsave("predicted_clutch.final.png",
+ggsave(here("prelim_figs/Publilia-05-fitness/predicted_clutch.final.png"),
        predicted_clutch.p.final,
        device = "png",
        width = 200, height = 200, units = "mm", dpi = "print")
 ```
 
 ### Estimating fitness from counts instead of from survivorship function
+2023.08.26 - `fitness_plot_dunn()` with `group=desert_cat_ants` caused error so changed to `group=desert_cat`, as for iterations above
 ```{r}
 # fitness_life_strats_data <- fitness_life_strats_data %>%
 #   mutate(desert_cat_ants = factor(desert_cat_ants, levels=c("desert control", "eggs control", 
@@ -1847,28 +1472,51 @@ ggsave("predicted_clutch.final.png",
 
 fitness_stats_eggs_counted <- 
   fitness_KW_test(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat_ants)
+fitness_stats_eggs_counted["multcompLetters"]$multcompLetters$x <- 
+  rep(c("visit", "desert","eggs", "nymphs"),2)
+fitness_stats_eggs_counted["multcompLetters"]$multcompLetters <- 
+  bind_cols(fitness_stats_eggs_counted["multcompLetters"]$multcompLetters, 
+            tibble(ants_removed = c(F,F,F,F,T,T,T,T)))
+
 (fitness_counted_stats_eggs.p <- 
-  fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat_ants, 
+  fitness_plot_dunn(data=fitness_life_strats_data, y=est_eggs_life, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_eggs_counted$multcompLetters,
                     letterSize=4, ymax=160) +
   ylab("Lifetime fecundity\n(eggs laid)") + 
     theme(legend.position="none",
           axis.title.x = element_blank(),axis.text.x=element_blank()))
 
+
 fitness_stats_hatched_counted <- 
   fitness_KW_test(data=fitness_life_strats_data, y=est_hatched_life_v1, group=desert_cat_ants)
+fitness_stats_hatched_counted["multcompLetters"]$multcompLetters$x <- 
+  rep(c("visit", "desert","eggs", "nymphs"),2)
+fitness_stats_hatched_counted["multcompLetters"]$multcompLetters <- 
+  bind_cols(fitness_stats_hatched_counted["multcompLetters"]$multcompLetters, 
+            tibble(ants_removed = c(F,F,F,F,T,T,T,T)))
+
 (fitness_counted_stats_hatched.p <- 
-  fitness_plot_dunn(data=fitness_life_strats_data, y=est_hatched_life_v1, group=desert_cat_ants, 
+  fitness_plot_dunn(data=fitness_life_strats_data, y=est_hatched_life_v1, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_hatched_counted$multcompLetters,
                     letterSize=4, ymax=75) +
   ylab("Lifetime fitness\n(eggs hatched)") + 
     theme(legend.position=c(0.75,0.9),
           axis.title.x = element_blank(),axis.text.x=element_blank()))
 
+
 fitness_stats_survived_counted <- 
   fitness_KW_test(data=fitness_life_strats_data, y=est_survived_life_v1, group=desert_cat_ants)
+
+fitness_stats_survived_counted <- 
+  fitness_KW_test(data=fitness_life_strats_data, y=est_hatched_life_v1, group=desert_cat_ants)
+fitness_stats_survived_counted["multcompLetters"]$multcompLetters$x <- 
+  rep(c("visit", "desert","eggs", "nymphs"),2)
+fitness_stats_survived_counted["multcompLetters"]$multcompLetters <- 
+  bind_cols(fitness_stats_survived_counted["multcompLetters"]$multcompLetters, 
+            tibble(ants_removed = c(F,F,F,F,T,T,T,T)))
+
 (fitness_counted_stats_survived.p <- 
-  fitness_plot_dunn(data=fitness_life_strats_data, y=est_survived_life_v1, group=desert_cat_ants, 
+  fitness_plot_dunn(data=fitness_life_strats_data, y=est_survived_life_v1, group=desert_cat, 
                     itero=F, multcompLetters=fitness_stats_survived_counted$multcompLetters,
                     letterSize=4, ymax=30) +
   ylab("Lifetime fitness\n(nymphs survived)") + 
@@ -1882,10 +1530,10 @@ fitness_stats_survived_counted <-
   labels=c("A","B","C"),
   ncol=1, nrow=3))
 
-# ggsave("CHAPTER/fitness_counted_stats.final.png",
-#        fitness_counted_stats.p.final,
-#        device = "png",
-#        width = 120, height = 200, units = "mm", dpi = "print")
+ggsave(here("prelim_figs/Publilia-05-fitness/fitness_counted_stats.final.png"),
+       fitness_counted_stats.p.final,
+       device = "png",
+       width = 120, height = 200, units = "mm", dpi = "print")
 ```
 
 

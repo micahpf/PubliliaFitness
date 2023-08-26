@@ -57,7 +57,7 @@ des_Esurv.desL.ant_treatment.quad <- surv_reg_data %>%
   runTenureXOffspringModel(survNom="n_survived", survDen="med_t5eggs", 
                            tenure="des", treatment="ant_treatment")
 
-models_output <- list(
+surv_model_fits <- list(
   hatch = des_hatch.desL.ant_treatment.quad$fits,
   Nsurv = des_Nsurv.desL.ant_treatment.quad$fits,
   Esurv = des_Esurv.desL.ant_treatment.quad$fits
@@ -86,17 +86,17 @@ ggsave(here("prelim_figs/Publilia-03-survivorship/",
 ### Print model outputs
 #### Hatch
 ```{r}
-print_glm_stats(models_output$hatch)
+print_glm_stats(surv_model_fits$hatch)
 ```
 
 #### Nsurv
 ```{r}
-print_glm_stats(models_output$Nsurv)
+print_glm_stats(surv_model_fits$Nsurv)
 ```
 
 #### Esurv
 ```{r}
-print_glm_stats(models_output$Esurv)
+print_glm_stats(surv_model_fits$Esurv)
 ```
 
 ### Tables
@@ -159,6 +159,13 @@ desL.ant_treatment.quad.qb.tbl.merge %>%
   flextable::save_as_docx(path=here("prelim_figs/Publilia-03-survivorship/",
                                     "surv.reg_summary.desL.ants_treatment.quad.docx"))
 ```
+
+## Save Main model fits for estimating fitness
+
+```{r}
+write_rds(surv_model_fits, here("saved_rds/surv_model_fits.rds"))
+```
+
 
 
 ## Supp 1 - `desL * ants_gt2 * desL^2`

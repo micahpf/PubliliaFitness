@@ -82,7 +82,7 @@ fitness_KW_test <- function(data, y, group){
 
 
 ## plot boxplots, including KWtest letters
-fitness_plot_dunn <- function(data, y, group, itero=F, multcompLetters, letterSize, ymax=160){
+fitness_plot_dunn <- function(data, y, group, itero=F, multcompLetters, letterSize=3, ymax=160){
   if(itero==F){
     (p <- eval(substitute(data %>%
                             filter(!females_removed, !is.na(group)) %>%
