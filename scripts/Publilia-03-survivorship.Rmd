@@ -25,7 +25,8 @@ library(multcompView)
 library(here)
 library(bbmle)
 
-source(here("R/custom_functions.R"))
+source(here("R/utils.R"))
+source(here("R/Publilia-03-survivorship-functions.R"))
 ```
 
 # 0 - Data import
