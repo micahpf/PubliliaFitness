@@ -11,14 +11,22 @@ toc_depth: 3
 # Load libraries
 
 ```{r}
+library(here)
+library(tidyverse)
+library(rstatix)
+library(effectsize)
 library(multcompView)
+source(here("R/utils.R"))
 source(here("R/Publilia-05-fitness-functions.R"))
 ```
 
 # 0 - Data import
 
 ```{r}
-surv_reg_data <- read_rds(here("saved_rds/surv_reg_data.rds"))
+strats_data <- read_rds(here("saved_rds/strats_data.rds"))
+clutch_survivorship_data <- read_rds(here("saved_rds/clutch_survivorship_data.rds"))
+focalMb4h_sc2h <- read_rds(here("saved_rds/focalMb4h_sc2h.rds"))
+moms_plant_data <- read_rds(here("saved_rds/moms_plant_data.rds"))
 surv_model_fits <- read_rds(here("saved_rds/surv_model_fits.rds"))
 ```
 
@@ -35,28 +43,29 @@ The current versions are:
  - v6: (survivorship ~ ant_treatment * I(desL^2)) * proportion of time on eggs
 
 ```{r}
-est_fitness_prep <- visited_1st_4d_data %>%
+est_fitness_prep <- strats_data %>%
   filter(!is.na(initiation_date)) %>%
   group_by(Female_ID) %>%
   mutate(started_by_initiating =
            any(clutch_visited_order==1&clutch_initiated_order==1)) %>%
   ungroup() %>%
-  select(location, Female_ID, clutch_visited_order, clutch_initiated_order, 
+  select(location, Female_ID, clutch_visited_order, clutch_initiated_order,
          desert_rel2h = est_rel2h, guard_duration,
-         mom_at_init, started_by_initiating) %>%
-  left_join(select(clutch_survivorship_data, location:last_desert, 
-                   n_eggs, med_t5eggs, n_hatched, n_survived, DormPlant), 
+         mom_at_init, started_by_initiating, ever_antsP) %>%
+  left_join(select(clutch_survivorship_data, location:last_desert,
+                   n_eggs, med_t5eggs, n_hatched, n_survived, DormPlant),
             by=c("location")) %>%
   left_join(select(focalMb4h_sc2h, Female_ID, location, focalMb4h_sc2h),
             by=c("Female_ID", "location")) %>%
-  mutate(des=last_des_rel2h, 
+  mutate(des=last_des_rel2h,
          ants=ifelse(ants_removed,"Removed","Control"),
          vis=`visited in 4 days`) %>%
-  left_join(select(ant_counts, location, ever_antsP)) %>%
   separate(location, into = c("DormPlant", "Leaf"), sep="_", remove=FALSE) %>%
   left_join(dplyr::select(moms_plant_data, DormPlant, last_visit_ends_P), by="DormPlant") %>%
   mutate(last_desP_rel2h = last_visit_ends_P-est_hatch,
          ant_treatment=ifelse(ants_removed,"Removed","Control"))
+
+# beware that clutch_status_momDays_b4h was create by right-joining clutch_momDays_b4h; possible that some hidden filtering occurred there
 
 # v6: (survivorship ~ ant_treatment * I(desL^2)) * proportion of time on eggs
 est_fitness_hatch_fit_v6 <- 
@@ -141,7 +150,7 @@ est_fitness_clutch %>%
 # It appears that my modeling is overestimating the number of nymphs hatched for clutches with very low est hatched v1
 est_fitness_clutch %>% 
   filter(!is.na(est_hatched_clutch_v1),!is.na(est_hatched_clutch_v6)) %>%
-  ggplot(data=., aes(x=est_hatched_clutch_v1, y=est_hatched_clutch_v6, color=sum_vD==0)) +
+  ggplot(data=., aes(x=est_hatched_clutch_v1, y=est_hatched_clutch_v6, color=vis)) +
   geom_abline(slope=1) +
   geom_point()
 
@@ -641,7 +650,7 @@ egg::ggarrange(est_fitness_life_strats_splitvio_eggs_v1_itero.p,
 ```
 
 split violin v6
-```{r}
+```{r, fig.width = 6, fig.height = 4}
 est_fitness_life_strats_splitvio_eggs_v6.p <- est_fitness_life_strats %>%
   mutate(desert_cat = fct_relevel(desert_cat, "visit", "desert", "eggs", "nymphs")) %>%
   filter(!females_removed) %>%

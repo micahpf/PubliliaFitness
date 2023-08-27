@@ -2291,10 +2291,18 @@ write_rds(surv_reg_data, here("saved_rds/surv_reg_data.rds"))
 
 ## `Publilia-04-within_clutch_iteroparity.Rmd`
 ```{r}
-write_rds(clutch_egg_num_data, here("saved_rds/clutch_egg_num_data"))
+write_rds(clutch_egg_num_data, here("saved_rds/clutch_egg_num_data.rds"))
 write_rds(t5eggs_data, here("saved_rds/t5eggs_data"))
 write_rds(fec_model_data, here("saved_rds/fec_model_data.rds"))
 write_rds(clutch_status_init_hatch_labels_v1, here("saved_rds/clutch_status_init_hatch_labels_v1.rds"))
+```
+
+# 14 - Write data for 
+
+```{r}
+write_rds(moms_plant_data, here("saved_rds/moms_plant_data.rds"))
+write_rds(focalMb4h_sc2h, here("saved_rds/focalMb4h_sc2h.rds"))
+write_rds(clutch_survivorship_data, here("saved_rds/clutch_survivorship_data.rds"))
 ```
 
 
