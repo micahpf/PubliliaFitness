@@ -25,11 +25,10 @@ details > summary {
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
                       fig.width = 8, fig.height = 6) 
 
-library(kableExtra)   ## Needed if rendering tables
+library(kableExtra) ## Needed if rendering tables
 ```
 
-
-# 0 - Data import
+**Setup**
 
 ```{r}
 library(here)
@@ -46,6 +45,217 @@ clutch_status_guarding_summary_v2
 All_data_v6 <- read_rds(here("saved_rds/All_data_v6.rds"))
 strats_data <- read_rds(here("saved_rds/strats_data.rds"))
 ```
+
+# 1 - Maternal egg guarding increases offspring survivorship, and ants enhance this effect
+
+## Prep
+
+```{r}
+## Load data
+surv_reg_data <- read_rds(here("saved_rds/surv_reg_data.rds"))
+```
+
+```{r}
+## Fit models
+# hatching success
+des_hatch.desL.ant_treatment.quad <- surv_reg_data %>%
+  runTenureXOffspringModel(survNom="n_hatched", survDen="med_t5eggs", 
+                           tenure="des", treatment="ant_treatment")
+
+# nymph survivorship
+des_Nsurv.desL.ant_treatment.quad <- surv_reg_data %>%
+  runTenureXOffspringModel(survNom="n_survived", survDen="n_hatched", 
+                           tenure="des", treatment="ant_treatment")
+
+# egg survivorship
+des_Esurv.desL.ant_treatment.quad <- surv_reg_data %>%
+  runTenureXOffspringModel(survNom="n_survived", survDen="med_t5eggs", 
+                           tenure="des", treatment="ant_treatment")
+
+surv_model_fits <- list(
+  hatch = des_hatch.desL.ant_treatment.quad$fits,
+  Nsurv = des_Nsurv.desL.ant_treatment.quad$fits,
+  Esurv = des_Esurv.desL.ant_treatment.quad$fits
+)
+```
+
+## Figure 5
+
+```{r}
+(desL.ant_treatment.quad.p <- egg::ggarrange(
+  des_hatch.desL.ant_treatment.quad$p +
+    ylab("Hatching success") +
+    theme(legend.position="none"),
+  des_Nsurv.desL.ant_treatment.quad$p +
+    ylab("Nymph survivorship") +
+    theme(legend.position="none"),
+  des_Esurv.desL.ant_treatment.quad$p +
+    theme(legend.position = c(0.8,0.95)) + 
+    ylab("Egg survivorship") +
+    ylim(0,1),
+  labels=c("A","B","C"),
+  ncol=3))
+
+ggsave(here("manuscript/",
+            "Figure5.png"),
+       desL.ant_treatment.quad.p,
+       device="png", width = 300, height = 110, units = "mm", dpi = "print")
+```
+
+## Table 1
+
+```{r}
+hatch.desL.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_hatch.desL.ant_treatment.quad$fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+Nsurv.desL.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_Nsurv.desL.ant_treatment.quad$fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+Esurv.desL.ant_treatment.quad.qb.tbl <- 
+  tbl_regression(des_Esurv.desL.ant_treatment.quad$fits$mai.qb, exponentiate=T,
+                 label=list(des ~ "Leaf desert date",
+                            `I(as.numeric(des)^2)` ~ "(Leaf desert date)^2",
+                            ant_treatment ~ "Ants")) %>% bold_p()
+
+(desL.ant_treatment.quad.qb.tbl.merge <- 
+  tbl_merge(
+    tbls = list(hatch.desL.ant_treatment.quad.qb.tbl, 
+                Nsurv.desL.ant_treatment.quad.qb.tbl, 
+                Esurv.desL.ant_treatment.quad.qb.tbl),
+    tab_spanner = c("**Hatching success**", 
+                    "**Survivorship of nymphs**", 
+                    "**Survivorship of eggs**")
+  ) %>%
+  modify_header(label = "**Variable**") %>%
+  bold_labels() %>% italicize_levels())
+
+desL.ant_treatment.quad.qb.tbl.merge %>%
+  as_flex_table() %>%
+  flextable::save_as_docx(path=here("manuscript",
+                                    "Table1.docx"))
+
+```
+
+## [Text] Hatching success
+
+```{r}
+## Sample size table
+(surv_reg_data.tbl_summary.desL.ant_treatment <- surv_reg_data %>%
+  mutate(ants = ant_treatment,
+         females = ifelse(females_removed, "Females removed", "Control"),
+         `leaf desert date rel. hatch` = des,
+         `visited early` = vis,
+         `n eggs` = med_t5eggs,
+         `n hatched` = n_hatched,
+         `n survived` = n_survived) %>%
+  select(ants, females, `leaf desert date rel. hatch`, `visited early`, 
+         `n eggs`, `n hatched`, `n survived`) %>%
+  group_by(females, ants) %>%
+  tbl_summary(by = ants) %>%
+  bold_labels() %>% italicize_levels() %>%
+  add_n())
+```
+
+```{r}
+## Hatch
+# at -20,0,10 etc.
+ci_for_stats(data_in=
+               tibble(ant_treatment=c(rep("Control",5), rep("Removed",5)),
+                      des=rep(c(-20,10,0,10,20),2)), 
+             des_hatch.desL.ant_treatment.quad$fits$mai.qb)
+
+# where is the maximum?
+get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",10000)),
+                           des=rep(seq(-20,20,length.out=10000),2)),
+            model=des_hatch.desL.ant_treatment.quad$fits$mai.qb)
+```
+
+
+# 2 - Offspring survivorship is equivalent when either mothers or ants guard nymphs 
+
+## [Text] Nymph survivorship
+
+```{r}
+# Nsurv
+# at -20,0,10 etc.
+ci_for_stats(data_in=
+               tibble(ant_treatment=c(rep("Control",5), rep("Removed",5)),
+                      des=rep(c(-20,10,0,10,20),2)), 
+             des_Nsurv.desL.ant_treatment.quad$fits$mai.qb)
+
+# where is the maximum?
+get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",10000)),
+                           des=rep(seq(-20,20,length.out=10000),2)),
+            model=des_Nsurv.desL.ant_treatment.quad$fits$mai.qb)
+```
+
+
+## [Text] Egg survivorship
+
+```{r}
+# Esurv
+# at -20,0,10 etc.
+ci_for_stats(data_in=
+               tibble(ant_treatment=c(rep("Control",5), rep("Removed",5)),
+                      des=rep(c(-20,10,0,10,20),2)), 
+             des_Esurv.desL.ant_treatment.quad$fits$mai.qb)
+
+# where is the maximum?
+get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",10000)),
+                           des=rep(seq(-20,20,length.out=10000),2)),
+            model=des_Esurv.desL.ant_treatment.quad$fits$mai.qb)
+```
+
+
+# 3 - Mothers dynamically adjust care depending on the presence of ants and conspecific females
+
+## Figure Figure S3
+
+
+
+## Figure 3
+
+
+
+## [Text]
+
+
+
+# 4 - Early visits by other females lead to early desertion of clutches
+
+## Appendix A (?)
+
+
+
+## Figure 4
+
+
+
+## [Text]
+
+
+
+# 5 - Ant mutualists reliably enhance lifetime fitness, but offloading care to peers is risky
+
+## Figure 6
+
+
+
+## Figure S4
+
+
+
+## [Text]
+
+
+
+
+
+# Old:
 
 # 1 - Mothers dynamically adjust care depending on the presence of ants and conspecific females
 
