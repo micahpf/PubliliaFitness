@@ -52,7 +52,9 @@ strats_data <- read_rds(here("saved_rds/strats_data.rds"))
 
 ```{r}
 ## Load data
-surv_reg_data <- read_rds(here("saved_rds/surv_reg_data.rds"))
+surv_reg_data <- read_rds(here("saved_rds/surv_reg_data.rds")) %>%
+    mutate(ant_treatment = ifelse(ant_treatment == "Removed", 
+                                  "Ant exclusion", ant_treatment))
 ```
 
 ```{r}
@@ -64,12 +66,12 @@ des_hatch.desL.ant_treatment.quad <- surv_reg_data %>%
 
 # nymph survivorship
 des_Nsurv.desL.ant_treatment.quad <- surv_reg_data %>%
-  runTenureXOffspringModel(survNom="n_survived", survDen="n_hatched", 
+  runTenureXOffspringModel(., survNom="n_survived", survDen="n_hatched", 
                            tenure="des", treatment="ant_treatment")
 
 # egg survivorship
 des_Esurv.desL.ant_treatment.quad <- surv_reg_data %>%
-  runTenureXOffspringModel(survNom="n_survived", survDen="med_t5eggs", 
+  runTenureXOffspringModel(., survNom="n_survived", survDen="med_t5eggs", 
                            tenure="des", treatment="ant_treatment")
 
 surv_model_fits <- list(
@@ -79,27 +81,25 @@ surv_model_fits <- list(
 )
 ```
 
-## Figure 5
+## Figure 2
 
-```{r}
+```{r, fig.height = 2, fig.width = 6}
 (desL.ant_treatment.quad.p <- egg::ggarrange(
   des_hatch.desL.ant_treatment.quad$p +
+    xlab("Desertion date relative to hatch") +
     ylab("Hatching success") +
     theme(legend.position="none"),
   des_Nsurv.desL.ant_treatment.quad$p +
+    xlab("Desertion date relative to hatch") +
     ylab("Nymph survivorship") +
     theme(legend.position="none"),
   des_Esurv.desL.ant_treatment.quad$p +
     theme(legend.position = c(0.8,0.95)) + 
+    xlab("Desertion date relative to hatch") +
     ylab("Egg survivorship") +
     ylim(0,1),
   labels=c("A","B","C"),
   ncol=3))
-
-ggsave(here("manuscript/",
-            "Figure5.png"),
-       desL.ant_treatment.quad.p,
-       device="png", width = 300, height = 110, units = "mm", dpi = "print")
 ```
 
 ## Table 1
@@ -219,7 +219,65 @@ get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",1
 
 ## Figure 3
 
+```{r, fig.width=3, fig.height=3}
+visit_colors <- rev(unique(ggplot_build(Fig1_v1D)$data[[1]]$fill))
 
+hist_strips <- strip_nested(
+     # Horizontal strips
+     background_y = list(
+       element_rect(fill = visit_colors[1]), 
+       element_rect(fill = visit_colors[2]), 
+       element_blank(), element_blank(), 
+       element_blank(), element_blank()),
+     text_y = list(
+       element_text(color = c("black")), 
+       element_text(color = c("black")), 
+       element_blank(), element_blank(), 
+       element_blank(), element_blank()),
+     by_layer_y = FALSE
+)
+
+base_text <- expand.grid(ants = c("Ants removed", "Control"),
+            `visited in 4 days` = c("Not visited\nwithin first 4 days", 
+                                    "Visited\nwithin first 4 days")) %>%
+  tibble()
+
+hatch_text <- base_text %>%
+  mutate(label = ifelse(ants=="Ants removed" & `visited in 4 days`=="Not visited\nwithin first 4 days", 
+         "Hatch date", 
+         ""))
+
+(guarding_durations_plot_2023 <- strats_data %>%
+  filter(!grepl("U", Female_ID), !females_removed, mom_at_init,
+         clutch_initiated_order == 1, visit_ends < last_day_fID) %>% 
+  filter(!is.na(`visited in 4 days`)) %>%
+  mutate(`visited in 4 days` = 
+           ifelse(`visited in 4 days` == "Visited", 
+                  "Visited\nwithin first 4 days", 
+                  "Not visited\nwithin first 4 days")) %>%
+  ggplot(aes(x=guard_duration, fill=ants)) +
+  geom_histogram(binwidth = 4) +
+  theme_publilia() +
+  xlab("Guarding duration") +
+  ylab("Number of females") +
+  scale_y_continuous(breaks = c(0,4,8),
+                     labels = label_number(accuracy = 1)) +
+  scale_color_manual(values = c("black", "brown1")) +
+  scale_fill_manual(values = c("black", "brown1")) +
+  geom_vline(xintercept = 20, linetype="dashed", 
+                color = "gray", size=1) +
+  ggh4x::facet_grid2(vars(`visited in 4 days`, ants), 
+                     strip = hist_strips) +
+  theme(strip.background = element_rect(color = NA),
+        strip.text = element_text(size = 12),
+        legend.justification = c(1,1),
+        legend.position = c(1,0.2),
+        legend.text = element_text(size = 12)) +
+  geom_text(data = hatch_text,
+            aes(x = 20, y = Inf, label = label),
+            hjust = -0.1, vjust = 0, color = "gray", fontface = "bold") +
+  coord_cartesian(clip = "off"))
+```
 
 ## [Text]
 
@@ -233,7 +291,48 @@ get_max_fit(data_in=tibble(ant_treatment=c(rep("Control",10000), rep("Removed",1
 
 ## Figure 4
 
+```{r, fig.width=3, fig.height=2}
 
+# non-parametric: Kruskall-Wallis test followed by Dunn test or pairwise wilcox tests
+vis_cat_v1.data <- strats_data %>%
+  left_join(first_visit_cuts) %>%
+  mutate(vis_cat = ifelse(num_at_init > 1,
+                          "0",
+                          ifelse(is.na(first_visit_starts),
+                                 "never visited",
+                                 ifelse(first_visit_cut=="(0,4]", "1 to 4", "5+"))),
+         vis_cat = factor(vis_cat, levels = c("0","1 to 4",
+                                              "5+","never visited"))) %>%
+  filter(!females_removed, mom_at_init, 
+         clutch_initiated_order == 1, 
+         !grepl("U", Female_ID),
+         visit_ends < last_day_fID,
+         # ** There was one female (E_Gkgg) which was on the eggs before and after but not ON the initiation date.
+         # I suspect I missed her in the field or she may have left and come back. In any case she was never visited
+         # and deserted 20 days after initiation and we have plenty such data points, so I think it's safe to ignore.
+         !is.na(vis_cat))
+
+(Fig1_v1D <- ggplot(data = vis_cat_v1.data, 
+       aes(y = guard_duration, x = vis_cat, group = vis_cat)) +
+  #geom_boxplot(outlier.shape = NA) +
+  geom_violin(aes(fill=vis_cat%in%c("0","1 to 4")), color = NA, trim=T, size=2, alpha=0.50) +
+  geom_jitter(aes(color=vis_cat%in%c("0","1 to 4")), width=0.1, size=3) +
+  theme_publilia() +
+  scale_color_brewer(palette="Set2") + scale_fill_brewer(palette="Set2") +
+  xlab("First day clutch was visited (Days since clutch initiated)") +
+  ylab("Guarding duration of initiating female (days)") +
+  theme(legend.position = "none"))
+
+# Visualization: box plots with p-values
+Fig1_v1D +
+    geom_text(data=strats_cuts_v1.multcompLetters, 
+              aes(x=vis_cat, y=-4, label=label, 
+                  color=vis_cat%in%c("0","1 to 4")), 
+              fontface="bold", size=6) +
+  xlab("Day first visited (Days since initiation)") +
+  ylab("Guard duration of initiating female") +
+  theme(legend.position = "none")
+```
 
 ## [Text]
 

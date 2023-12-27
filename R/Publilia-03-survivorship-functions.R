@@ -76,7 +76,7 @@ ci_for_plot <- function(data_in, survNom, survDen,
 
 ### Plot model results with confidence intervals
 plot_ci <- function(ci_data, survNom, survDen, treatment, tenure){
-  plot <- ggplot(data = ci_data, 
+  p <- ggplot(data = ci_data, 
                  aes(x = .data[[tenure]], y = fit, 
                      color = .data[[treatment]], fill = .data[[treatment]])) +
     theme_publilia() +
@@ -84,6 +84,8 @@ plot_ci <- function(ci_data, survNom, survDen, treatment, tenure){
     geom_line(aes(y = fit), size = 1, key_glyph=draw_key_rect) +
     geom_ribbon(aes(ymin = conf_upr, ymax = conf_lwr),
                 alpha = 0.5, color = NA, key_glyph=draw_key_rect)
+  
+  return(p)
 }
 
 # Example
@@ -121,10 +123,9 @@ runTenureXOffspringModel <- function(surv_reg_data, survNom, survDen, tenure, tr
   
   p <- plot_ci(ci_data = test_ci_data, tenure = tenure, treatment=treatment,
                survNom = survNom, survDen = survDen) +
-    xlab("Latest desertion date relative to hatch") +
-    ylab("Hatching success") +
-    scale_color_manual(values = c("brown1", "black")) +
-    scale_fill_manual(values = c("brown1", "black"))
+    scale_color_manual(values = c("black", "brown1")) +
+    scale_fill_manual(values = c("black", "brown1"))
+  
   stat_summary <- summary(test_fits$mai.qb)
   
   obj_out <- list(
