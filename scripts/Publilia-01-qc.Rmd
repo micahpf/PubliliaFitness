@@ -2305,4 +2305,9 @@ write_rds(focalMb4h_sc2h, here("saved_rds/focalMb4h_sc2h.rds"))
 write_rds(clutch_survivorship_data, here("saved_rds/clutch_survivorship_data.rds"))
 ```
 
+# 15 - Write pre-processed data for publishing with manuscript
+
+```{r}
+write_csv(All_data_v6, here("data/PubliliaFitness_raw_data.csv"))
+```
 
