@@ -1,4 +1,24 @@
+# Rstudio
 .Rproj.user
 .Rhistory
 .RData
 .Ruserdata
+
+## MacOS
+# General
+.DS_Store
+.AppleDouble
+.LSOverride
+# Thumbnails
+._*
+
+## Microsoft Office
+*.tmp
+# Word temporary
+~$*.doc*
+# Word Auto Backup File
+Backup of *.doc*
+# Excel temporary
+~$*.xls*
+# Excel Backup File
+*.xlk
